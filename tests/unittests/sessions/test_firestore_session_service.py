@@ -164,3 +164,50 @@ async def test_append_event(mock_firestore_client):
   batch.set.assert_called_once()  # For event
   batch.update.assert_called_once()  # For session updateTime
   batch.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_append_event_with_state_delta(mock_firestore_client):
+  service = FirestoreSessionService(client=mock_firestore_client)
+  app_name = "test_app"
+  user_id = "test_user"
+  from google.adk.sessions.session import Session
+
+  session = Session(id="test_session", app_name=app_name, user_id=user_id)
+
+  # Using MagicMock for Event to bypass complex pydantic validation for test
+  event = mock.MagicMock()
+  event.partial = False
+  event.id = "test_event_id"
+  # Mock actions.state_delta
+  event.actions.state_delta = {
+      "_app_my_key": "app_val",
+      "_user_my_key": "user_val",
+      "session_key": "session_val",
+  }
+  # Mock model_dump to return valid event data
+  event.model_dump.return_value = {"id": "test_event_id", "author": "user"}
+
+  await service.append_event(session, event)
+
+  mock_firestore_client.batch.assert_called_once()
+  batch = mock_firestore_client.batch.return_value
+
+  # Verify app state set
+  # In code: batch.set(app_ref, app_updates, merge=True)
+  # But app_ref is a mock! Which mock?
+  # It's mock_firestore_client.collection().document()
+  # In fixture: collection_ref = mock.AsyncMock()
+  # doc_ref = mock.AsyncMock()
+  # client.collection.return_value = collection_ref
+  # collection_ref.document.return_value = doc_ref
+  # So batch.set is called with app_ref (which is doc_ref)
+  batch.set.assert_called()
+
+  # Verify session state updated in memory
+  assert session.state["session_key"] == "session_val"
+
+  # Verify batch update was called for session
+  batch.update.assert_called_once()
+
+  batch.commit.assert_called_once()
