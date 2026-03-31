@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime
+from datetime import timezone
 from typing import Any
 from typing import Optional
 
@@ -114,9 +116,6 @@ class FirestoreSessionService(BaseSessionService):
     # evaluated on the server, we might want to use local time for the object
     # or read it back. Reading it back is expensive. We'll use local time for
     # the object, but the DB will have SERVER_TIMESTAMP.
-    from datetime import datetime
-    from datetime import timezone
-
     local_now = datetime.now(timezone.utc).timestamp()
 
     return Session(
@@ -169,60 +168,6 @@ class FirestoreSessionService(BaseSessionService):
         ed = event_data["event_data"]
         # Restore timestamp if needed, or assume it's in event_data
         events.append(Event.model_validate(ed))
-
-    # Fetch states (app and user) if we want to merge them, similar to
-    # DatabaseSessionService. The Java code seems to merge them in listSessions
-    # but let's see if getSession does it.
-    # In Java, getSession fetches app/user state if needed? The Java code I read:
-    # It didn't seem to fetch app/user state in getSession, only in appendEvent
-    # where it updates them, and listSessions where it mergers.
-    # Wait, let's re-read Java getSession.
-    # It doesn't seem to fetch app/user state in getSession either?
-    # Actually, in Java `FirestoreSessionService.java` `getSession`:
-    # It reads the session doc, then reads events. It doesn't seem to read
-    # app/user state docs.
-    # But `DatabaseSessionService` in Python DOES read them in `get_session`.
-    # Let's align with Python `DatabaseSessionService` if possible, as it's the
-    # standard in Python ADK.
-    # Python `DatabaseSessionService` reads `StorageAppState` and `StorageUserState`
-    # and merges them.
-    # If I want to be consistent with Python ADK, I should probably do it.
-    # But if I want to be consistent with Java ADK port, I should follow Java.
-    # The user asked to "Port this firestore support over to ADK Python".
-    # I should follow the Java logic but make it Pythonic.
-    # The Java logic doesn't seem to merge app/user state in `getSession`, it
-    # just returns session state.
-    # Wait, let's check Java `listSessions`. It read `StorageAppState`? No, it
-    # just read sessions.
-    # Let's stick to the Java logic if it works, or adapt to Python if it's better.
-    # Since `DatabaseSessionService` in Python merges them, maybe it's a newer
-    # feature in Python ADK that Java doesn't have or does differently.
-    # Let's check `FirestoreSessionService.java` again.
-    # In Java `listSessions`, it doesn't seem to fetch app/user state.
-    # In Java `appendEvent`, it updates app/user state if `state_delta` has
-    # `_app_` or `_user_` prefixes.
-    # Let's stick to the Java behavior unless it conflicts with Python interfaces.
-    # The Python `BaseSessionService` doesn't enforce merging, it just defines
-    # the interface. `DatabaseSessionService` implements merging.
-    # I'll stick to the Java behavior (no merging in get/list, only update in append)
-    # for now, as it's a port of Java. Or I can implement merging if it's easy.
-    # Let's look at Java `appendEvent`:
-    # It checks `_app_` and `_user_` prefixes in `state_delta` and updates
-    # separate collections!
-    # ```java
-    # firestore.collection(APP_STATE_COLLECTION).document(appName).set(...)
-    # ```
-    # So it DOES use separate collections for app/user state.
-    # If it uses them, it should probably read them somewhere. In Java, it seems
-    # it might not read them in `getSession`? Wait, let's check `FirestoreSessionService.java`
-    # again. I see `listSessions` doesn't read them. `getSession` doesn't read them.
-    # That might be a bug or partial implementation in Java? Or maybe they are
-    # read elsewhere?
-    # In Python `DatabaseSessionService` reads them in `get_session` and `list_sessions`.
-    # Let's implement reading them in Python `FirestoreSessionService` to be
-    # consistent with Python ADK standards if possible, or at least support it.
-    # I'll implement it without merging first to match Java, then see if I should
-    # add it. The Java code didn't do it.
 
     # Let's continue getting session.
     session_state = data.get("state", {})
