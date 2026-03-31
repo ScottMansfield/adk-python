@@ -42,8 +42,21 @@ def mock_firestore_client():
   doc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
   subdoc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
 
-  # Mock subcollection get() (for events list in delete_session)
+  # Set methods used in create_session and delete_session to AsyncMock
+  subdoc_ref.set = mock.AsyncMock()
+  subdoc_ref.delete = mock.AsyncMock()
+
+  # Mock events subcollection
+  events_collection_ref = mock.MagicMock()
+  subdoc_ref.collection.return_value = events_collection_ref
+  events_collection_ref.order_by.return_value = events_collection_ref
+  events_collection_ref.where.return_value = events_collection_ref
+  events_collection_ref.limit_to_last.return_value = events_collection_ref
+  events_collection_ref.get = mock.AsyncMock(return_value=[])
+
+  # Mock subcollection get() (for sessions listing)
   subcollection_ref.get = mock.AsyncMock(return_value=[])
+  subcollection_ref.where.return_value = subcollection_ref
 
   # Mock collection group
   client.collection_group.return_value = collection_ref
@@ -135,7 +148,7 @@ async def test_delete_session(mock_firestore_client):
       mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
   )
   event_doc = mock.AsyncMock()
-  events_ref.get.return_value = [event_doc]
+  events_ref.get = mock.AsyncMock(return_value=[event_doc])
 
   await service.delete_session(
       app_name=app_name, user_id=user_id, session_id=session_id

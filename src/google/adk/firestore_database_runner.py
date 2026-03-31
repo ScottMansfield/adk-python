@@ -56,6 +56,7 @@ def create_firestore_runner(
   memory_service = FirestoreMemoryService()
 
   return Runner(
+      app_name=agent.name,
       agent=agent,
       session_service=session_service,
       artifact_service=artifact_service,
