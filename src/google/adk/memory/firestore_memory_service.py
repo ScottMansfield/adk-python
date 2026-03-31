@@ -20,8 +20,8 @@ import os
 import re
 from typing import Any
 from typing import Optional
+from typing import TYPE_CHECKING
 
-from google.cloud import firestore
 from typing_extensions import override
 
 from . import _utils
@@ -30,7 +30,9 @@ from .base_memory_service import BaseMemoryService
 from .base_memory_service import SearchMemoryResponse
 from .memory_entry import MemoryEntry
 
-if False:  # TYPE_CHECKING
+if TYPE_CHECKING:
+  from google.cloud import firestore
+
   from ..sessions.session import Session
 
 logger = logging.getLogger("google_adk." + __name__)
@@ -261,7 +263,12 @@ class FirestoreMemoryService(BaseMemoryService):
       stop_words: A set of words to ignore when extracting keywords. Defaults to
         a standard English stop words list.
     """
-    self.client = client or firestore.AsyncClient()
+    if client is None:
+      from google.cloud import firestore
+
+      self.client = firestore.AsyncClient()
+    else:
+      self.client = client
     self.events_collection = events_collection or DEFAULT_EVENTS_COLLECTION
     self.stop_words = (
         stop_words if stop_words is not None else DEFAULT_STOP_WORDS
