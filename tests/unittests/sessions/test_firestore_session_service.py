@@ -23,12 +23,11 @@ import pytest
 
 @pytest.fixture
 def mock_firestore_client():
-  client = mock.AsyncMock()
-  # Mock collection and document references
-  collection_ref = mock.AsyncMock()
-  doc_ref = mock.AsyncMock()
-  subcollection_ref = mock.AsyncMock()
-  subdoc_ref = mock.AsyncMock()
+  client = mock.MagicMock()
+  collection_ref = mock.MagicMock()
+  doc_ref = mock.MagicMock()
+  subcollection_ref = mock.MagicMock()
+  subdoc_ref = mock.MagicMock()
 
   client.collection.return_value = collection_ref
   collection_ref.document.return_value = doc_ref
@@ -36,14 +35,23 @@ def mock_firestore_client():
   subcollection_ref.document.return_value = subdoc_ref
 
   # Mock get() for documents
-  doc_snapshot = mock.AsyncMock()
+  doc_snapshot = mock.MagicMock()
   doc_snapshot.exists = False
   doc_snapshot.to_dict.return_value = {}
-  doc_ref.get.return_value = doc_snapshot
-  subdoc_ref.get.return_value = doc_snapshot
+
+  doc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
+  subdoc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
+
+  # Mock subcollection get() (for events list in delete_session)
+  subcollection_ref.get = mock.AsyncMock(return_value=[])
 
   # Mock collection group
   client.collection_group.return_value = collection_ref
+
+  # Mock batch
+  batch = mock.MagicMock()
+  client.batch.return_value = batch
+  batch.commit = mock.AsyncMock()
 
   return client
 

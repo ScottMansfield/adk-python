@@ -24,15 +24,18 @@ import pytest
 
 @pytest.fixture
 def mock_firestore_client():
-  client = mock.AsyncMock()
-  collection_ref = mock.AsyncMock()
+  client = mock.MagicMock()
+  collection_ref = mock.MagicMock()
   client.collection_group.return_value = collection_ref
+
+  # where() should return self (collection_ref) to allow chaining
   collection_ref.where.return_value = collection_ref
 
   # Mock get() for documents
-  doc_snapshot = mock.AsyncMock()
+  doc_snapshot = mock.MagicMock()
   doc_snapshot.to_dict.return_value = {}
-  collection_ref.get.return_value = [doc_snapshot]
+
+  collection_ref.get = mock.AsyncMock(return_value=[doc_snapshot])
 
   return client
 

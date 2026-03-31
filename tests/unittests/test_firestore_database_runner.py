@@ -31,10 +31,15 @@ def mock_agent():
 def test_create_firestore_runner_with_arg(mock_agent, monkeypatch):
   monkeypatch.delenv("ADK_GCS_BUCKET_NAME", raising=False)
 
-  # Mock GcsArtifactService to avoid real client init
-  with mock.patch(
-      "google.adk.firestore_database_runner.GcsArtifactService"
-  ) as mock_gcs:
+  with (
+      mock.patch(
+          "google.adk.firestore_database_runner.FirestoreSessionService"
+      ),
+      mock.patch("google.adk.firestore_database_runner.FirestoreMemoryService"),
+      mock.patch(
+          "google.adk.firestore_database_runner.GcsArtifactService"
+      ) as mock_gcs,
+  ):
     runner = create_firestore_runner(mock_agent, gcs_bucket_name="test_bucket")
 
     assert runner is not None
@@ -44,9 +49,15 @@ def test_create_firestore_runner_with_arg(mock_agent, monkeypatch):
 def test_create_firestore_runner_with_env(mock_agent, monkeypatch):
   monkeypatch.setenv("ADK_GCS_BUCKET_NAME", "env_bucket")
 
-  with mock.patch(
-      "google.adk.firestore_database_runner.GcsArtifactService"
-  ) as mock_gcs:
+  with (
+      mock.patch(
+          "google.adk.firestore_database_runner.FirestoreSessionService"
+      ),
+      mock.patch("google.adk.firestore_database_runner.FirestoreMemoryService"),
+      mock.patch(
+          "google.adk.firestore_database_runner.GcsArtifactService"
+      ) as mock_gcs,
+  ):
     runner = create_firestore_runner(mock_agent)
 
     assert runner is not None
