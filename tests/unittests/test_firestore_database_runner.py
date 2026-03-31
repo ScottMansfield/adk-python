@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from unittest import mock
 
-import pytest
 from google.adk.agents.base_agent import BaseAgent
 from google.adk.firestore_database_runner import create_firestore_runner
+import pytest
 
 
 @pytest.fixture
