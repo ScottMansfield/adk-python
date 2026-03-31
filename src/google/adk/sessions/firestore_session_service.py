@@ -28,7 +28,6 @@ from .base_session_service import GetSessionConfig
 from .base_session_service import ListSessionsResponse
 from .session import Session
 
-
 logger = logging.getLogger("google_adk." + __name__)
 
 DEFAULT_ROOT_COLLECTION = "adk-session"
@@ -65,7 +64,9 @@ class FirestoreSessionService(BaseSessionService):
     self.app_state_collection = DEFAULT_APP_STATE_COLLECTION
     self.user_state_collection = DEFAULT_USER_STATE_COLLECTION
 
-  def _get_sessions_ref(self, user_id: str) -> firestore.AsyncCollectionReference:
+  def _get_sessions_ref(
+      self, user_id: str
+  ) -> firestore.AsyncCollectionReference:
     return (
         self.client.collection(self.root_collection)
         .document(user_id)
@@ -83,6 +84,7 @@ class FirestoreSessionService(BaseSessionService):
     """Creates a new session in Firestore."""
     if not session_id:
       from google.adk.platform import uuid as platform_uuid
+
       session_id = platform_uuid.new_uuid()
 
     initial_state = state or {}
@@ -94,6 +96,7 @@ class FirestoreSessionService(BaseSessionService):
     doc = await session_ref.get()
     if doc.exists:
       from ..errors.already_exists_error import AlreadyExistsError
+
       raise AlreadyExistsError(f"Session {session_id} already exists.")
 
     session_data = {
@@ -113,6 +116,7 @@ class FirestoreSessionService(BaseSessionService):
     # the object, but the DB will have SERVER_TIMESTAMP.
     from datetime import datetime
     from datetime import timezone
+
     local_now = datetime.now(timezone.utc).timestamp()
 
     return Session(
@@ -323,12 +327,11 @@ class FirestoreSessionService(BaseSessionService):
 
       for key, value in state_delta.items():
         if key.startswith("_app_"):
-          app_updates[key[len("_app_"):]] = value
+          app_updates[key[len("_app_") :]] = value
         elif key.startswith("_user_"):
-          user_updates[key[len("_user_"):]] = value
+          user_updates[key[len("_user_") :]] = value
         else:
           session_updates[key] = value
-
 
       # Update session doc with new state and updateTime
       # We'll do it outside the batch or inside if we can.
@@ -367,7 +370,9 @@ class FirestoreSessionService(BaseSessionService):
 
       # Add event
       event_id = event.id
-      event_ref = session_ref.collection(self.events_collection).document(event_id)
+      event_ref = session_ref.collection(self.events_collection).document(
+          event_id
+      )
       # Store event data as JSON serialized string or dict
       event_data = event.model_dump(exclude_none=True, mode="json")
       batch.set(
@@ -385,7 +390,9 @@ class FirestoreSessionService(BaseSessionService):
       # No state delta, just add event and update session timestamp
       batch = self.client.batch()
       event_id = event.id
-      event_ref = session_ref.collection(self.events_collection).document(event_id)
+      event_ref = session_ref.collection(self.events_collection).document(
+          event_id
+      )
       event_data = event.model_dump(exclude_none=True, mode="json")
       batch.set(
           event_ref,

@@ -14,8 +14,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import os
 from typing import Optional
+from typing import TYPE_CHECKING
 
 from .artifacts.gcs_artifact_service import GcsArtifactService
 from .memory.firestore_memory_service import FirestoreMemoryService
@@ -41,15 +42,13 @@ def create_firestore_runner(
   Returns:
     A Runner instance configured with Firestore services.
   """
-  # GcsArtifactService might require bucket name in constructor or read from env.
-  # Let's assume it reads from env or takes it.
-  # If we pass it, we might need to check its signature.
-  # Let's assume it takes bucket_name if provided, or reads from env.
-  artifact_service = GcsArtifactService()
-  if gcs_bucket_name:
-    # If GcsArtifactService supports setting it, we set it.
-    # Or we can assume it reads from ADK_GCS_BUCKET_NAME env var.
-    pass
+  bucket_name = gcs_bucket_name or os.environ.get("ADK_GCS_BUCKET_NAME")
+  if not bucket_name:
+    raise ValueError(
+        "Required property 'ADK_GCS_BUCKET_NAME' is not set. This"
+        " is needed for the GcsArtifactService."
+    )
+  artifact_service = GcsArtifactService(bucket_name=bucket_name)
 
   session_service = FirestoreSessionService(
       root_collection=firestore_root_collection

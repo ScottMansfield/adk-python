@@ -16,10 +16,10 @@ from __future__ import annotations
 
 from unittest import mock
 
-import pytest
 from google.adk.events.event import Event
 from google.adk.memory.firestore_memory_service import FirestoreMemoryService
 from google.genai import types
+import pytest
 
 
 @pytest.fixture
@@ -71,7 +71,9 @@ async def test_search_memory_with_results(mock_firestore_client):
   query = "quick fox"
 
   # Mock document snapshot to return event data
-  doc_snapshot = mock_firestore_client.collection_group.return_value.where.return_value.where.return_value.where.return_value.get.return_value[0]
+  doc_snapshot = mock_firestore_client.collection_group.return_value.where.return_value.where.return_value.where.return_value.get.return_value[
+      0
+  ]
   event = Event(
       invocation_id="test_inv",
       author="user",

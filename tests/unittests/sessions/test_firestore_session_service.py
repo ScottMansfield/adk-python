@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from unittest import mock
 
-import pytest
 from google.adk.events.event import Event
 from google.adk.sessions.firestore_session_service import FirestoreSessionService
+import pytest
 
 
 @pytest.fixture
@@ -94,7 +94,9 @@ async def test_get_session_found(mock_firestore_client):
   session_id = "test_session"
 
   # Mock document snapshot to return data
-  doc_snapshot = mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value
+  doc_snapshot = (
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value
+  )
   doc_snapshot.exists = True
   doc_snapshot.to_dict.return_value = {
       "id": session_id,
@@ -121,7 +123,9 @@ async def test_delete_session(mock_firestore_client):
   session_id = "test_session"
 
   # Mock events subcollection
-  events_ref = mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+  events_ref = (
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+  )
   event_doc = mock.AsyncMock()
   events_ref.get.return_value = [event_doc]
 
@@ -137,7 +141,9 @@ async def test_delete_session(mock_firestore_client):
   batch.commit.assert_called_once()
 
   # Verify session deletion
-  session_doc_ref = mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value
+  session_doc_ref = (
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value
+  )
   session_doc_ref.delete.assert_called_once()
 
 
@@ -147,6 +153,7 @@ async def test_append_event(mock_firestore_client):
   app_name = "test_app"
   user_id = "test_user"
   from google.adk.sessions.session import Session
+
   session = Session(id="test_session", app_name=app_name, user_id=user_id)
   event = Event(invocation_id="test_inv", author="user")
 
@@ -154,6 +161,6 @@ async def test_append_event(mock_firestore_client):
 
   mock_firestore_client.batch.assert_called_once()
   batch = mock_firestore_client.batch.return_value
-  batch.set.assert_called_once() # For event
-  batch.update.assert_called_once() # For session updateTime
+  batch.set.assert_called_once()  # For event
+  batch.update.assert_called_once()  # For session updateTime
   batch.commit.assert_called_once()
