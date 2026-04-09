@@ -44,7 +44,17 @@ DEFAULT_USER_STATE_COLLECTION = "user_states"
 
 
 class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
-  """Session service that uses Google Cloud Firestore as the backend."""
+  """Session service that uses Google Cloud Firestore as the backend.
+
+  It creates a hierarchy in Firestore to hold events by user and session:
+  adk-session
+  ↳ <user ID>
+    ↳ sessions
+      ↳ <session ID>
+        ↳ events
+          ↳ <event ID>
+            ↳ Event document
+  """
 
   def __init__(
       self,

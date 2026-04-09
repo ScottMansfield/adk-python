@@ -44,7 +44,10 @@ DEFAULT_MEMORIES_COLLECTION = "memories"
 
 
 class FirestoreMemoryService(BaseMemoryService):
-  """Memory service that uses Google Cloud Firestore as the backend."""
+  """Memory service that uses Google Cloud Firestore as the backend.
+
+  It uses the existing session data to create memories in a top-level memory collection.
+  """
 
   def __init__(
       self,
