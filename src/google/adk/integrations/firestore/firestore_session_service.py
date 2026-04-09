@@ -21,7 +21,6 @@ import os
 from typing import Any
 from typing import Optional
 
-from google.cloud import firestore
 from pydantic import BaseModel
 
 from ...events.event import Event
@@ -55,6 +54,14 @@ class FirestoreSessionService(BaseSessionService):
       root_collection: The root collection name. Defaults to 'adk-session' or
         the value of ADK_FIRESTORE_ROOT_COLLECTION env var.
     """
+    try:
+      from google.cloud import firestore
+    except ImportError as e:
+      raise ImportError(
+          "FirestoreSessionService requires google-cloud-firestore. "
+          "Install it with: pip install google-cloud-firestore"
+      ) from e
+
     self.client = client or firestore.AsyncClient()
     self.root_collection = (
          root_collection
@@ -65,6 +72,22 @@ class FirestoreSessionService(BaseSessionService):
     self.events_collection = DEFAULT_EVENTS_COLLECTION
     self.app_state_collection = DEFAULT_APP_STATE_COLLECTION
     self.user_state_collection = DEFAULT_USER_STATE_COLLECTION
+
+  @staticmethod
+  def _merge_state(
+      app_state: dict[str, Any],
+      user_state: dict[str, Any],
+      session_state: dict[str, Any],
+  ) -> dict[str, Any]:
+    """Merge app, user, and session states into a single state dictionary."""
+    import copy
+
+    merged_state = copy.deepcopy(session_state)
+    for key, value in app_state.items():
+      merged_state["_app_" + key] = value
+    for key, value in user_state.items():
+      merged_state["_user_" + key] = value
+    return merged_state
 
   def _get_sessions_ref(
       self, user_id: str
@@ -84,6 +107,7 @@ class FirestoreSessionService(BaseSessionService):
       session_id: Optional[str] = None,
   ) -> Session:
     """Creates a new session in Firestore."""
+    from google.cloud import firestore
     if not session_id:
       from ...platform import uuid as platform_uuid
 
@@ -202,17 +226,50 @@ class FirestoreSessionService(BaseSessionService):
       )
       docs = await query.get()
 
+    # Fetch shared state once
+    app_ref = self.client.collection(self.app_state_collection).document(
+        app_name
+    )
+    app_doc = await app_ref.get()
+    app_state = app_doc.to_dict() if app_doc.exists else {}
+
+    user_states_map = {}
+    if user_id:
+      user_ref = (
+          self.client.collection(self.user_state_collection)
+          .document(app_name)
+          .collection("users")
+          .document(user_id)
+      )
+      user_doc = await user_ref.get()
+      if user_doc.exists:
+        user_states_map[user_id] = user_doc.to_dict()
+    else:
+      users_ref = (
+          self.client.collection(self.user_state_collection)
+          .document(app_name)
+          .collection("users")
+      )
+      users_docs = await users_ref.get()
+      for u_doc in users_docs:
+        user_states_map[u_doc.id] = u_doc.to_dict()
+
     sessions = []
     for doc in docs:
       data = doc.to_dict()
       if data:
+        u_id = data["userId"]
+        s_state = data.get("state", {})
+        u_state = user_states_map.get(u_id, {})
+        merged = self._merge_state(app_state, u_state, s_state)
+
         sessions.append(
             Session(
                 id=data["id"],
                 app_name=data["appName"],
                 user_id=data["userId"],
-                state={},  # Empty state for listing
-                events=[],  # Empty events for listing
+                state=merged,
+                events=[],
                 last_update_time=0.0,
             )
         )
@@ -226,17 +283,65 @@ class FirestoreSessionService(BaseSessionService):
     session_ref = self._get_sessions_ref(user_id).document(session_id)
 
     events_ref = session_ref.collection(self.events_collection)
-    events_docs = await events_ref.get()
-
+    
     batch = self.client.batch()
-    for event_doc in events_docs:
+    count = 0
+    async for event_doc in events_ref.stream():
       batch.delete(event_doc.reference)
-    await batch.commit()
+      count += 1
+      if count >= 500:
+        await batch.commit()
+        batch = self.client.batch()
+        count = 0
+    if count > 0:
+      await batch.commit()
 
     await session_ref.delete()
 
+  async def _update_app_state_transactional(
+      self, app_name: str, delta: dict[str, Any]
+  ) -> dict[str, Any]:
+    """Atomically applies delta to app state inside a transaction."""
+    from google.cloud import firestore
+    doc_ref = self.client.collection(self.app_state_collection).document(app_name)
+
+    @firestore.async_transactional
+    async def _txn(transaction):
+      snap = await doc_ref.get(transaction=transaction)
+      current = snap.to_dict() if snap.exists else {}
+      current.update(delta)
+      transaction.set(doc_ref, current, merge=True)
+      return current
+
+    transaction = self.client.transaction()
+    return await _txn(transaction)
+
+  async def _update_user_state_transactional(
+      self, app_name: str, user_id: str, delta: dict[str, Any]
+  ) -> dict[str, Any]:
+    """Atomically applies delta to user state inside a transaction."""
+    from google.cloud import firestore
+    doc_ref = (
+        self.client.collection(self.user_state_collection)
+        .document(app_name)
+        .collection("users")
+        .document(user_id)
+    )
+
+    @firestore.async_transactional
+    async def _txn(transaction):
+      snap = await doc_ref.get(transaction=transaction)
+      current = snap.to_dict() if snap.exists else {}
+      current.update(delta)
+      transaction.set(doc_ref, current, merge=True)
+      return current
+
+    transaction = self.client.transaction()
+    return await _txn(transaction)
+
   async def append_event(self, session: Session, event: Event) -> Event:
     """Appends an event to a session in Firestore."""
+    from google.cloud import firestore
     if event.partial:
       return event
 
@@ -259,26 +364,16 @@ class FirestoreSessionService(BaseSessionService):
         else:
           session_updates[key] = value
 
-      batch = self.client.batch()
-
       if app_updates:
-        app_ref = self.client.collection(self.app_state_collection).document(
-            session.app_name
-        )
-        batch.set(app_ref, app_updates, merge=True)
+        await self._update_app_state_transactional(session.app_name, app_updates)
 
       if user_updates:
-        user_ref = (
-            self.client.collection(self.user_state_collection)
-            .document(session.app_name)
-            .collection("users")
-            .document(session.user_id)
-        )
-        batch.set(user_ref, user_updates, merge=True)
+        await self._update_user_state_transactional(session.app_name, session.user_id, user_updates)
 
       for k, v in session_updates.items():
         session.state[k] = v
 
+      batch = self.client.batch()
       batch.update(
           session_ref,
           {

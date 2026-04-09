@@ -139,13 +139,18 @@ async def test_delete_session(mock_firestore_client):
       mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
   )
   event_doc = mock.AsyncMock()
-  events_ref.get = mock.AsyncMock(return_value=[event_doc])
+
+  async def to_async_iter(iterable):
+    for item in iterable:
+      yield item
+
+  events_ref.stream.return_value = to_async_iter([event_doc])
 
   await service.delete_session(
       app_name=app_name, user_id=user_id, session_id=session_id
   )
 
-  events_ref.get.assert_called_once()
+  events_ref.stream.assert_called_once()
   mock_firestore_client.batch.assert_called_once()
   batch = mock_firestore_client.batch.return_value
   batch.delete.assert_called_once_with(event_doc.reference)
@@ -195,9 +200,19 @@ async def test_append_event_with_state_delta(mock_firestore_client):
   }
   event.model_dump.return_value = {"id": "test_event_id", "author": "user"}
 
+  service._update_app_state_transactional = mock.AsyncMock()
+  service._update_user_state_transactional = mock.AsyncMock()
+
   await service.append_event(session, event)
 
   mock_firestore_client.batch.assert_called_once()
+  service._update_app_state_transactional.assert_called_once_with(
+      "test_app", {"my_key": "app_val"}
+  )
+  service._update_user_state_transactional.assert_called_once_with(
+      "test_app", "test_user", {"my_key": "user_val"}
+  )
+
   batch = mock_firestore_client.batch.return_value
 
   batch.set.assert_called()
@@ -207,3 +222,210 @@ async def test_append_event_with_state_delta(mock_firestore_client):
   batch.update.assert_called_once()
 
   batch.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_with_user_id(mock_firestore_client):
+  service = FirestoreSessionService(client=mock_firestore_client)
+  app_name = "test_app"
+  user_id = "test_user"
+
+  session_doc = mock.MagicMock()
+  session_doc.to_dict.return_value = {
+      "id": "session1",
+      "appName": app_name,
+      "userId": user_id,
+      "state": {"session_key": "session_val"},
+  }
+
+  app_state_coll = mock.MagicMock()
+  user_state_coll = mock.MagicMock()
+  sessions_coll = mock.MagicMock()
+
+  def collection_side_effect(name):
+    if name == service.app_state_collection:
+      return app_state_coll
+    elif name == service.user_state_collection:
+      return user_state_coll
+    elif name == service.root_collection:
+      return sessions_coll
+    return mock.MagicMock()
+
+  mock_firestore_client.collection.side_effect = collection_side_effect
+
+  app_doc = mock.MagicMock()
+  app_doc.exists = True
+  app_doc.to_dict.return_value = {"app_key": "app_val"}
+  app_doc_ref = mock.MagicMock()
+  app_state_coll.document.return_value = app_doc_ref
+  app_doc_ref.get = mock.AsyncMock(return_value=app_doc)
+
+  user_doc = mock.MagicMock()
+  user_doc.exists = True
+  user_doc.to_dict.return_value = {"user_key": "user_val"}
+  user_app_doc = mock.MagicMock()
+  user_state_coll.document.return_value = user_app_doc
+  users_coll = mock.MagicMock()
+  user_app_doc.collection.return_value = users_coll
+  user_doc_ref = mock.MagicMock()
+  users_coll.document.return_value = user_doc_ref
+  user_doc_ref.get = mock.AsyncMock(return_value=user_doc)
+
+  user_doc_in_sessions = mock.MagicMock()
+  sessions_coll.document.return_value = user_doc_in_sessions
+  sessions_subcoll = mock.MagicMock()
+  user_doc_in_sessions.collection.return_value = sessions_subcoll
+  sessions_query = mock.MagicMock()
+  sessions_subcoll.where.return_value = sessions_query
+  sessions_query.get = mock.AsyncMock(return_value=[session_doc])
+
+  response = await service.list_sessions(app_name=app_name, user_id=user_id)
+
+  assert len(response.sessions) == 1
+  session = response.sessions[0]
+  assert session.id == "session1"
+  assert session.state["session_key"] == "session_val"
+  assert session.state["_app_app_key"] == "app_val"
+  assert session.state["_user_user_key"] == "user_val"
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_without_user_id(mock_firestore_client):
+  service = FirestoreSessionService(client=mock_firestore_client)
+  app_name = "test_app"
+
+  session_doc = mock.MagicMock()
+  session_doc.to_dict.return_value = {
+      "id": "session1",
+      "appName": app_name,
+      "userId": "user1",
+      "state": {"session_key": "session_val"},
+  }
+
+  mock_firestore_client.collection_group.return_value.where.return_value.get = mock.AsyncMock(
+      return_value=[session_doc]
+  )
+
+  app_state_coll = mock.MagicMock()
+  user_state_coll = mock.MagicMock()
+
+  def collection_side_effect(name):
+    if name == service.app_state_collection:
+      return app_state_coll
+    elif name == service.user_state_collection:
+      return user_state_coll
+    return mock.MagicMock()
+
+  mock_firestore_client.collection.side_effect = collection_side_effect
+
+  app_doc = mock.MagicMock()
+  app_doc.exists = True
+  app_doc.to_dict.return_value = {"app_key": "app_val"}
+  app_doc_ref = mock.MagicMock()
+  app_state_coll.document.return_value = app_doc_ref
+  app_doc_ref.get = mock.AsyncMock(return_value=app_doc)
+
+  user_doc = mock.MagicMock()
+  user_doc.id = "user1"
+  user_doc.to_dict.return_value = {"user_key": "user_val"}
+  user_app_doc = mock.MagicMock()
+  user_state_coll.document.return_value = user_app_doc
+  users_coll = mock.MagicMock()
+  user_app_doc.collection.return_value = users_coll
+  users_coll.get = mock.AsyncMock(return_value=[user_doc])
+
+  response = await service.list_sessions(app_name=app_name)
+
+  assert len(response.sessions) == 1
+  session = response.sessions[0]
+  assert session.id == "session1"
+  assert session.state["_app_app_key"] == "app_val"
+  assert session.state["_user_user_key"] == "user_val"
+
+
+@pytest.mark.asyncio
+async def test_create_session_already_exists(mock_firestore_client):
+  service = FirestoreSessionService(client=mock_firestore_client)
+  app_name = "test_app"
+  user_id = "test_user"
+
+  doc_snapshot = mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value
+  doc_snapshot.exists = True
+
+  from google.adk.errors.already_exists_error import AlreadyExistsError
+
+  with pytest.raises(AlreadyExistsError):
+    await service.create_session(
+        app_name=app_name, user_id=user_id, session_id="existing_id"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_session_with_config(mock_firestore_client):
+  service = FirestoreSessionService(client=mock_firestore_client)
+  app_name = "test_app"
+  user_id = "test_user"
+  session_id = "test_session"
+
+  doc_snapshot = mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value
+  doc_snapshot.exists = True
+  doc_snapshot.to_dict.return_value = {
+      "id": session_id,
+      "appName": app_name,
+      "userId": user_id,
+  }
+
+  events_collection_ref = mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+
+  from google.adk.sessions.base_session_service import GetSessionConfig
+
+  config = GetSessionConfig(after_timestamp=1234567890.0, num_recent_events=5)
+
+  await service.get_session(
+      app_name=app_name, user_id=user_id, session_id=session_id, config=config
+  )
+
+  events_collection_ref.where.assert_called_once()
+  events_collection_ref.limit_to_last.assert_called_once_with(5)
+
+
+@pytest.mark.asyncio
+async def test_delete_session_batching(mock_firestore_client):
+  service = FirestoreSessionService(client=mock_firestore_client)
+  app_name = "test_app"
+  user_id = "test_user"
+  session_id = "test_session"
+
+  events_ref = mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+
+  dummy_docs = [mock.MagicMock() for _ in range(501)]
+
+  async def to_async_iter(iterable):
+    for item in iterable:
+      yield item
+
+  events_ref.stream.return_value = to_async_iter(dummy_docs)
+
+  batch = mock_firestore_client.batch.return_value
+
+  await service.delete_session(
+      app_name=app_name, user_id=user_id, session_id=session_id
+  )
+
+  assert batch.commit.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_append_event_partial(mock_firestore_client):
+  service = FirestoreSessionService(client=mock_firestore_client)
+  from google.adk.sessions.session import Session
+
+  session = Session(id="test_session", app_name="test_app", user_id="test_user")
+
+  event = Event(invocation_id="test_inv", author="user", partial=True)
+
+  result = await service.append_event(session, event)
+
+  assert result == event
+  mock_firestore_client.batch.assert_not_called()
+

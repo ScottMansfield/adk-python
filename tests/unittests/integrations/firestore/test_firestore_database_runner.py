@@ -71,3 +71,22 @@ def test_create_firestore_runner_missing_bucket(mock_agent, monkeypatch):
       ValueError, match="Required property 'ADK_GCS_BUCKET_NAME' is not set"
   ):
     create_firestore_runner(mock_agent)
+
+
+def test_create_firestore_runner_with_root_collection(mock_agent, monkeypatch):
+  monkeypatch.setenv("ADK_GCS_BUCKET_NAME", "test_bucket")
+
+  with (
+      mock.patch(
+          "google.adk.integrations.firestore.firestore_database_runner.FirestoreSessionService"
+      ) as mock_session,
+      mock.patch("google.adk.integrations.firestore.firestore_database_runner.FirestoreMemoryService"),
+      mock.patch("google.adk.integrations.firestore.firestore_database_runner.GcsArtifactService"),
+  ):
+    runner = create_firestore_runner(
+        mock_agent, firestore_root_collection="custom_collection"
+    )
+
+    assert runner is not None
+    mock_session.assert_called_once_with(root_collection="custom_collection")
+

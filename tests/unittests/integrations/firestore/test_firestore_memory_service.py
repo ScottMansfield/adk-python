@@ -93,3 +93,75 @@ async def test_search_memory_with_results(mock_firestore_client):
   mock_firestore_client.collection_group.assert_called_with("events")
   collection_ref = mock_firestore_client.collection_group.return_value
   collection_ref.where.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_search_memory_deduplication(mock_firestore_client):
+  service = FirestoreMemoryService(client=mock_firestore_client)
+  app_name = "test_app"
+  user_id = "test_user"
+  query = "quick fox"
+
+  event1 = Event(
+      invocation_id="test_inv1",
+      author="user",
+      content=types.Content(parts=[types.Part(text="quick fox jumps")]),
+      timestamp=1234567890.0,
+  )
+  event2 = Event(
+      invocation_id="test_inv2",
+      author="user",
+      content=types.Content(parts=[types.Part(text="quick fox jumps")]),
+      timestamp=1234567890.0,
+  )
+
+  doc_snapshot1 = mock.MagicMock()
+  doc_snapshot1.to_dict.return_value = {
+      "event_data": event1.model_dump(exclude_none=True, mode="json")
+  }
+
+  doc_snapshot2 = mock.MagicMock()
+  doc_snapshot2.to_dict.return_value = {
+      "event_data": event2.model_dump(exclude_none=True, mode="json")
+  }
+
+  get_mock = mock.AsyncMock(side_effect=[[doc_snapshot1], [doc_snapshot2]])
+
+  mock_firestore_client.collection_group.return_value.where.return_value.where.return_value.where.return_value.get = get_mock
+
+  response = await service.search_memory(
+      app_name=app_name, user_id=user_id, query=query
+  )
+
+  assert response.memories
+  assert len(response.memories) == 1
+  assert response.memories[0].author == "user"
+
+
+@pytest.mark.asyncio
+async def test_search_memory_parsing_error(mock_firestore_client, caplog):
+  service = FirestoreMemoryService(client=mock_firestore_client)
+  app_name = "test_app"
+  user_id = "test_user"
+  query = "quick"
+
+  doc_snapshot = mock_firestore_client.collection_group.return_value.where.return_value.where.return_value.where.return_value.get.return_value[0]
+  doc_snapshot.to_dict.return_value = {"event_data": "invalid_data"}
+
+  response = await service.search_memory(
+      app_name=app_name, user_id=user_id, query=query
+  )
+
+  assert not response.memories
+  assert "Failed to parse event from Firestore" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_search_memory_only_stop_words(mock_firestore_client):
+  service = FirestoreMemoryService(client=mock_firestore_client)
+  response = await service.search_memory(
+      app_name="test_app", user_id="test_user", query="the and or"
+  )
+  assert not response.memories
+  mock_firestore_client.collection_group.assert_not_called()
+
