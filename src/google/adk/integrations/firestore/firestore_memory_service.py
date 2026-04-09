@@ -22,6 +22,7 @@ from typing import Any
 from typing import Optional
 from typing import TYPE_CHECKING
 
+from google.cloud.firestore_v1.base_query import FieldFilter
 from typing_extensions import override
 
 from ...events.event import Event
@@ -289,9 +290,9 @@ class FirestoreMemoryService(BaseMemoryService):
     """Searches for events matching a single keyword."""
     query = (
         self.client.collection_group(self.events_collection)
-        .where("appName", "==", app_name)
-        .where("userId", "==", user_id)
-        .where("keywords", "array_contains", keyword)
+        .where(filter=FieldFilter("appName", "==", app_name))
+        .where(filter=FieldFilter("userId", "==", user_id))
+        .where(filter=FieldFilter("keywords", "array_contains", keyword))
     )
 
     docs = await query.get()
