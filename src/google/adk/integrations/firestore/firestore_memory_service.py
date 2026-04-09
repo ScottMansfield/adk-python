@@ -30,6 +30,7 @@ from ...memory import _utils
 from ...memory.base_memory_service import BaseMemoryService
 from ...memory.base_memory_service import SearchMemoryResponse
 from ...memory.memory_entry import MemoryEntry
+from ._stop_words import DEFAULT_STOP_WORDS
 
 if TYPE_CHECKING:
   from google.cloud import firestore
@@ -39,209 +40,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("google_adk." + __name__)
 
 DEFAULT_EVENTS_COLLECTION = "events"
-
-DEFAULT_STOP_WORDS = {
-    "a",
-    "an",
-    "the",
-    "and",
-    "or",
-    "but",
-    "if",
-    "then",
-    "else",
-    "to",
-    "of",
-    "in",
-    "on",
-    "for",
-    "with",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "do",
-    "does",
-    "did",
-    "can",
-    "could",
-    "will",
-    "would",
-    "should",
-    "shall",
-    "may",
-    "might",
-    "must",
-    "up",
-    "down",
-    "out",
-    "in",
-    "over",
-    "under",
-    "again",
-    "further",
-    "then",
-    "once",
-    "here",
-    "there",
-    "when",
-    "where",
-    "why",
-    "how",
-    "all",
-    "any",
-    "both",
-    "each",
-    "few",
-    "more",
-    "most",
-    "other",
-    "some",
-    "such",
-    "no",
-    "nor",
-    "not",
-    "only",
-    "own",
-    "same",
-    "so",
-    "than",
-    "too",
-    "very",
-    "i",
-    "me",
-    "my",
-    "myself",
-    "we",
-    "our",
-    "ours",
-    "ourselves",
-    "you",
-    "your",
-    "yours",
-    "yourself",
-    "yourselves",
-    "he",
-    "him",
-    "his",
-    "himself",
-    "she",
-    "her",
-    "hers",
-    "herself",
-    "it",
-    "its",
-    "itself",
-    "they",
-    "them",
-    "their",
-    "theirs",
-    "themselves",
-    "what",
-    "which",
-    "who",
-    "whom",
-    "this",
-    "that",
-    "these",
-    "those",
-    "am",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "having",
-    "do",
-    "does",
-    "did",
-    "doing",
-    "a",
-    "an",
-    "the",
-    "and",
-    "but",
-    "if",
-    "or",
-    "because",
-    "as",
-    "until",
-    "while",
-    "of",
-    "at",
-    "by",
-    "for",
-    "with",
-    "about",
-    "against",
-    "between",
-    "into",
-    "through",
-    "during",
-    "before",
-    "after",
-    "above",
-    "below",
-    "to",
-    "from",
-    "up",
-    "down",
-    "in",
-    "out",
-    "on",
-    "off",
-    "over",
-    "under",
-    "again",
-    "further",
-    "then",
-    "once",
-    "here",
-    "there",
-    "when",
-    "where",
-    "why",
-    "how",
-    "all",
-    "any",
-    "both",
-    "each",
-    "few",
-    "more",
-    "most",
-    "other",
-    "some",
-    "such",
-    "no",
-    "nor",
-    "not",
-    "only",
-    "own",
-    "same",
-    "so",
-    "than",
-    "too",
-    "very",
-    "s",
-    "t",
-    "can",
-    "will",
-    "just",
-    "don",
-    "should",
-    "now",
-}
+DEFAULT_MEMORIES_COLLECTION = "memories"
 
 
 class FirestoreMemoryService(BaseMemoryService):
@@ -252,6 +51,7 @@ class FirestoreMemoryService(BaseMemoryService):
       client: Optional[firestore.AsyncClient] = None,
       events_collection: Optional[str] = None,
       stop_words: Optional[set[str]] = None,
+      memories_collection: Optional[str] = None,
   ):
     """Initializes the Firestore memory service.
 
@@ -262,6 +62,8 @@ class FirestoreMemoryService(BaseMemoryService):
         Defaults to 'events'.
       stop_words: A set of words to ignore when extracting keywords. Defaults to
         a standard English stop words list.
+      memories_collection: The name of the memories collection. Defaults to
+        'memories'.
     """
     if client is None:
       from google.cloud import firestore
@@ -270,14 +72,45 @@ class FirestoreMemoryService(BaseMemoryService):
     else:
       self.client = client
     self.events_collection = events_collection or DEFAULT_EVENTS_COLLECTION
+    self.memories_collection = memories_collection or DEFAULT_MEMORIES_COLLECTION
     self.stop_words = (
         stop_words if stop_words is not None else DEFAULT_STOP_WORDS
     )
 
   @override
   async def add_session_to_memory(self, session: Session) -> None:
-    """No-op. Assumes events are written to Firestore by FirestoreSessionService."""
-    pass
+    """Extracts keywords from session events and stores them in the memories collection."""
+    batch = self.client.batch()
+    has_updates = False
+
+    for event in session.events:
+      if not event.content or not event.content.parts:
+        continue
+
+      text = " ".join([part.text for part in event.content.parts if part.text])
+      if not text:
+        continue
+
+      keywords = self._extract_keywords(text)
+      if not keywords:
+        continue
+
+      doc_ref = self.client.collection(self.memories_collection).document()
+      batch.set(
+          doc_ref,
+          {
+              "appName": session.app_name,
+              "userId": session.user_id,
+              "keywords": list(keywords),
+              "author": event.author,
+              "content": event.content.model_dump(exclude_none=True, mode="json"),
+              "timestamp": event.timestamp,
+          },
+      )
+      has_updates = True
+
+    if has_updates:
+      await batch.commit()
 
   def _extract_keywords(self, text: str) -> set[str]:
     """Extracts keywords from text, ignoring stop words."""
@@ -289,7 +122,7 @@ class FirestoreMemoryService(BaseMemoryService):
   ) -> list[MemoryEntry]:
     """Searches for events matching a single keyword."""
     query = (
-        self.client.collection_group(self.events_collection)
+        self.client.collection(self.memories_collection)
         .where(filter=FieldFilter("appName", "==", app_name))
         .where(filter=FieldFilter("userId", "==", user_id))
         .where(filter=FieldFilter("keywords", "array_contains", keyword))
@@ -299,19 +132,19 @@ class FirestoreMemoryService(BaseMemoryService):
     entries = []
     for doc in docs:
       data = doc.to_dict()
-      if data and "event_data" in data:
+      if data and "content" in data:
         try:
-          event = Event.model_validate(data["event_data"])
-          if event.content:
-            entries.append(
-                MemoryEntry(
-                    content=event.content,
-                    author=event.author,
-                    timestamp=_utils.format_timestamp(event.timestamp),
-                )
-            )
+          from google.genai import types
+          content = types.Content.model_validate(data["content"])
+          entries.append(
+              MemoryEntry(
+                  content=content,
+                  author=data.get("author", ""),
+                  timestamp=_utils.format_timestamp(data.get("timestamp", 0.0)),
+              )
+          )
         except Exception as e:
-          logger.warning("Failed to parse event from Firestore: %s", e)
+          logger.warning(f"Failed to parse memory entry: {e}")
 
     return entries
 
