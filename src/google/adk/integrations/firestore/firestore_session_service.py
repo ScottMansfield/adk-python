@@ -19,7 +19,12 @@ from datetime import timezone
 import logging
 import os
 from typing import Any
+from typing import cast
 from typing import Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+  from google.cloud import firestore
 
 from pydantic import BaseModel
 
@@ -38,7 +43,7 @@ DEFAULT_APP_STATE_COLLECTION = "app_states"
 DEFAULT_USER_STATE_COLLECTION = "user_states"
 
 
-class FirestoreSessionService(BaseSessionService):
+class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
   """Session service that uses Google Cloud Firestore as the backend."""
 
   def __init__(
@@ -309,8 +314,8 @@ class FirestoreSessionService(BaseSessionService):
         app_name
     )
 
-    @firestore.async_transactional
-    async def _txn(transaction):
+    @firestore.async_transactional  # type: ignore[untyped-decorator]
+    async def _txn(transaction: firestore.AsyncTransaction) -> dict[str, Any]:
       snap = await doc_ref.get(transaction=transaction)
       current = snap.to_dict() if snap.exists else {}
       current.update(delta)
@@ -318,7 +323,7 @@ class FirestoreSessionService(BaseSessionService):
       return current
 
     transaction = self.client.transaction()
-    return await _txn(transaction)
+    return cast(dict[str, Any], await _txn(transaction))
 
   async def _update_user_state_transactional(
       self, app_name: str, user_id: str, delta: dict[str, Any]
@@ -333,8 +338,8 @@ class FirestoreSessionService(BaseSessionService):
         .document(user_id)
     )
 
-    @firestore.async_transactional
-    async def _txn(transaction):
+    @firestore.async_transactional  # type: ignore[untyped-decorator]
+    async def _txn(transaction: firestore.AsyncTransaction) -> dict[str, Any]:
       snap = await doc_ref.get(transaction=transaction)
       current = snap.to_dict() if snap.exists else {}
       current.update(delta)
@@ -342,7 +347,7 @@ class FirestoreSessionService(BaseSessionService):
       return current
 
     transaction = self.client.transaction()
-    return await _txn(transaction)
+    return cast(dict[str, Any], await _txn(transaction))
 
   async def append_event(self, session: Session, event: Event) -> Event:
     """Appends an event to a session in Firestore."""
