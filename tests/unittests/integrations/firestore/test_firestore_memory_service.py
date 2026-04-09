@@ -73,9 +73,9 @@ async def test_search_memory_with_results(mock_firestore_client):
   doc_snapshot = mock_firestore_client.collection.return_value.where.return_value.where.return_value.where.return_value.get.return_value[
       0
   ]
-  
+
   content = types.Content(parts=[types.Part.from_text(text="quick fox jumps")])
-  
+
   doc_snapshot.to_dict.return_value = {
       "appName": app_name,
       "userId": user_id,
