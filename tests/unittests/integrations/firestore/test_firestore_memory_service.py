@@ -17,7 +17,7 @@ from __future__ import annotations
 from unittest import mock
 
 from google.adk.events.event import Event
-from google.adk.memory.firestore_memory_service import FirestoreMemoryService
+from google.adk.integrations.firestore.firestore_memory_service import FirestoreMemoryService
 from google.genai import types
 import pytest
 
@@ -28,10 +28,8 @@ def mock_firestore_client():
   collection_ref = mock.MagicMock()
   client.collection_group.return_value = collection_ref
 
-  # where() should return self (collection_ref) to allow chaining
   collection_ref.where.return_value = collection_ref
 
-  # Mock get() for documents
   doc_snapshot = mock.MagicMock()
   doc_snapshot.to_dict.return_value = {}
 
@@ -45,7 +43,6 @@ def test_extract_keywords(mock_firestore_client):
   text = "The quick brown fox jumps over the lazy dog."
   keywords = service._extract_keywords(text)
 
-  # Check that stopwords like "the", "over" are removed
   assert "the" not in keywords
   assert "over" not in keywords
   assert "quick" in keywords
@@ -73,7 +70,6 @@ async def test_search_memory_with_results(mock_firestore_client):
   user_id = "test_user"
   query = "quick fox"
 
-  # Mock document snapshot to return event data
   doc_snapshot = mock_firestore_client.collection_group.return_value.where.return_value.where.return_value.where.return_value.get.return_value[
       0
   ]
@@ -94,8 +90,6 @@ async def test_search_memory_with_results(mock_firestore_client):
   assert len(response.memories) == 1
   assert response.memories[0].author == "user"
 
-  # Verify Firestore calls
   mock_firestore_client.collection_group.assert_called_with("events")
   collection_ref = mock_firestore_client.collection_group.return_value
-  # Verify where calls (order might vary, so we just check it was called or check the chain)
   collection_ref.where.assert_called()

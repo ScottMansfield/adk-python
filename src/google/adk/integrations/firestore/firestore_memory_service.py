@@ -24,223 +24,44 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import override
 
-from . import _utils
-from ..events.event import Event
-from .base_memory_service import BaseMemoryService
-from .base_memory_service import SearchMemoryResponse
-from .memory_entry import MemoryEntry
+from ...memory import _utils
+from ...events.event import Event
+from ...memory.base_memory_service import BaseMemoryService
+from ...memory.base_memory_service import SearchMemoryResponse
+from ...memory.memory_entry import MemoryEntry
 
 if TYPE_CHECKING:
   from google.cloud import firestore
 
-  from ..sessions.session import Session
+  from ...sessions.session import Session
 
 logger = logging.getLogger("google_adk." + __name__)
 
 DEFAULT_EVENTS_COLLECTION = "events"
 
-# Standard English stop words
 DEFAULT_STOP_WORDS = {
-    "a",
-    "an",
-    "the",
-    "and",
-    "or",
-    "but",
-    "if",
-    "then",
-    "else",
-    "to",
-    "of",
-    "in",
-    "on",
-    "for",
-    "with",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "do",
-    "does",
-    "did",
-    "can",
-    "could",
-    "will",
-    "would",
-    "should",
-    "shall",
-    "may",
-    "might",
-    "must",
-    "up",
-    "down",
-    "out",
-    "in",
-    "over",
-    "under",
-    "again",
-    "further",
-    "then",
-    "once",
-    "here",
-    "there",
-    "when",
-    "where",
-    "why",
-    "how",
-    "all",
-    "any",
-    "both",
-    "each",
-    "few",
-    "more",
-    "most",
-    "other",
-    "some",
-    "such",
-    "no",
-    "nor",
-    "not",
-    "only",
-    "own",
-    "same",
-    "so",
-    "than",
-    "too",
-    "very",
-    "i",
-    "me",
-    "my",
-    "myself",
-    "we",
-    "our",
-    "ours",
-    "ourselves",
-    "you",
-    "your",
-    "yours",
-    "yourself",
-    "yourselves",
-    "he",
-    "him",
-    "his",
-    "himself",
-    "she",
-    "her",
-    "hers",
-    "herself",
-    "it",
-    "its",
-    "itself",
-    "they",
-    "them",
-    "their",
-    "theirs",
-    "themselves",
-    "what",
-    "which",
-    "who",
-    "whom",
-    "this",
-    "that",
-    "these",
-    "those",
-    "am",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "having",
-    "do",
-    "does",
-    "did",
-    "doing",
-    "a",
-    "an",
-    "the",
-    "and",
-    "but",
-    "if",
-    "or",
-    "because",
-    "as",
-    "until",
-    "while",
-    "of",
-    "at",
-    "by",
-    "for",
-    "with",
-    "about",
-    "against",
-    "between",
-    "into",
-    "through",
-    "during",
-    "before",
-    "after",
-    "above",
-    "below",
-    "to",
-    "from",
-    "up",
-    "down",
-    "in",
-    "out",
-    "on",
-    "off",
-    "over",
-    "under",
-    "again",
-    "further",
-    "then",
-    "once",
-    "here",
-    "there",
-    "when",
-    "where",
-    "why",
-    "how",
-    "all",
-    "any",
-    "both",
-    "each",
-    "few",
-    "more",
-    "most",
-    "other",
-    "some",
-    "such",
-    "no",
-    "nor",
-    "not",
-    "only",
-    "own",
-    "same",
-    "so",
-    "than",
-    "too",
-    "very",
-    "s",
-    "t",
-    "can",
-    "will",
-    "just",
-    "don",
-    "should",
-    "now",
+    "a", "an", "the", "and", "or", "but", "if", "then", "else", "to", "of",
+    "in", "on", "for", "with", "is", "are", "was", "were", "be", "been",
+    "being", "have", "has", "had", "do", "does", "did", "can", "could",
+    "will", "would", "should", "shall", "may", "might", "must", "up", "down",
+    "out", "in", "over", "under", "again", "further", "then", "once", "here",
+    "there", "when", "where", "why", "how", "all", "any", "both", "each",
+    "few", "more", "most", "other", "some", "such", "no", "nor", "not",
+    "only", "own", "same", "so", "than", "too", "very", "i", "me", "my",
+    "myself", "we", "our", "ours", "ourselves", "you", "your", "yours",
+    "yourself", "yourselves", "he", "him", "his", "himself", "she", "her",
+    "hers", "herself", "it", "its", "itself", "they", "them", "their",
+    "theirs", "themselves", "what", "which", "who", "whom", "this", "that",
+    "these", "those", "am", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "having", "do", "does", "did", "doing", "a", "an",
+    "the", "and", "but", "if", "or", "because", "as", "until", "while", "of",
+    "at", "by", "for", "with", "about", "against", "between", "into",
+    "through", "during", "before", "after", "above", "below", "to", "from",
+    "up", "down", "in", "out", "on", "off", "over", "under", "again",
+    "further", "then", "once", "here", "there", "when", "where", "why", "how",
+    "all", "any", "both", "each", "few", "more", "most", "other", "some",
+    "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too",
+    "very", "s", "t", "can", "will", "just", "don", "should", "now",
 }
 
 
@@ -288,8 +109,6 @@ class FirestoreMemoryService(BaseMemoryService):
       self, app_name: str, user_id: str, keyword: str
   ) -> list[MemoryEntry]:
     """Searches for events matching a single keyword."""
-    # This requires a collection group index in Firestore for 'events' with
-    # appName == X, userId == Y, and keywords array-contains Z.
     query = (
         self.client.collection_group(self.events_collection)
         .where("appName", "==", app_name)
@@ -326,26 +145,16 @@ class FirestoreMemoryService(BaseMemoryService):
     if not keywords:
       return SearchMemoryResponse()
 
-    # Search for each keyword concurrently
     tasks = [
         self._search_by_keyword(app_name, user_id, keyword)
         for keyword in keywords
     ]
     results = await asyncio.gather(*tasks)
 
-    # Merge results and deduplicate by MemoryEntry content/author/timestamp
-    # (MemoryEntry is not hashable by default if it contains complex objects,
-    # so we might need to deduplicate by id if available, or by content string).
-    # Since we convert Event to MemoryEntry, we don't have event.id in MemoryEntry
-    # unless we add it. The Java code use custom hash/equals for MemoryEntry.
-    # In Python, MemoryEntry is a Pydantic model. We can deduplicate by model_dump_json()
-    # or by a custom key.
     seen = set()
     memories = []
     for result_list in results:
       for entry in result_list:
-        # Deduplicate by a key of (author, content_text)
-        # Content might be complex, so let's use its json representation or text
         content_text = ""
         if entry.content and entry.content.parts:
           content_text = " ".join(

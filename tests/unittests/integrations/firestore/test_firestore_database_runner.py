@@ -17,7 +17,7 @@ from __future__ import annotations
 from unittest import mock
 
 from google.adk.agents.base_agent import BaseAgent
-from google.adk.firestore_database_runner import create_firestore_runner
+from google.adk.integrations.firestore.firestore_database_runner import create_firestore_runner
 import pytest
 
 
@@ -33,11 +33,11 @@ def test_create_firestore_runner_with_arg(mock_agent, monkeypatch):
 
   with (
       mock.patch(
-          "google.adk.firestore_database_runner.FirestoreSessionService"
+          "google.adk.integrations.firestore.firestore_database_runner.FirestoreSessionService"
       ),
-      mock.patch("google.adk.firestore_database_runner.FirestoreMemoryService"),
+      mock.patch("google.adk.integrations.firestore.firestore_database_runner.FirestoreMemoryService"),
       mock.patch(
-          "google.adk.firestore_database_runner.GcsArtifactService"
+          "google.adk.integrations.firestore.firestore_database_runner.GcsArtifactService"
       ) as mock_gcs,
   ):
     runner = create_firestore_runner(mock_agent, gcs_bucket_name="test_bucket")
@@ -51,11 +51,11 @@ def test_create_firestore_runner_with_env(mock_agent, monkeypatch):
 
   with (
       mock.patch(
-          "google.adk.firestore_database_runner.FirestoreSessionService"
+          "google.adk.integrations.firestore.firestore_database_runner.FirestoreSessionService"
       ),
-      mock.patch("google.adk.firestore_database_runner.FirestoreMemoryService"),
+      mock.patch("google.adk.integrations.firestore.firestore_database_runner.FirestoreMemoryService"),
       mock.patch(
-          "google.adk.firestore_database_runner.GcsArtifactService"
+          "google.adk.integrations.firestore.firestore_database_runner.GcsArtifactService"
       ) as mock_gcs,
   ):
     runner = create_firestore_runner(mock_agent)

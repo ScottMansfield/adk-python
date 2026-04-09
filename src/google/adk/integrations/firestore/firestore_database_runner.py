@@ -18,13 +18,13 @@ import os
 from typing import Optional
 from typing import TYPE_CHECKING
 
-from .artifacts.gcs_artifact_service import GcsArtifactService
-from .memory.firestore_memory_service import FirestoreMemoryService
-from .runners import Runner
-from .sessions.firestore_session_service import FirestoreSessionService
+from ...artifacts.gcs_artifact_service import GcsArtifactService
+from ...runners import Runner
+from .firestore_memory_service import FirestoreMemoryService
+from .firestore_session_service import FirestoreSessionService
 
 if TYPE_CHECKING:
-  from .agents.base_agent import BaseAgent
+  from ...agents.base_agent import BaseAgent
 
 
 def create_firestore_runner(
