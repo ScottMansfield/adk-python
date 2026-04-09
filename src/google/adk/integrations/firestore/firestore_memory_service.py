@@ -72,7 +72,9 @@ class FirestoreMemoryService(BaseMemoryService):
     else:
       self.client = client
     self.events_collection = events_collection or DEFAULT_EVENTS_COLLECTION
-    self.memories_collection = memories_collection or DEFAULT_MEMORIES_COLLECTION
+    self.memories_collection = (
+        memories_collection or DEFAULT_MEMORIES_COLLECTION
+    )
     self.stop_words = (
         stop_words if stop_words is not None else DEFAULT_STOP_WORDS
     )
@@ -103,7 +105,9 @@ class FirestoreMemoryService(BaseMemoryService):
               "userId": session.user_id,
               "keywords": list(keywords),
               "author": event.author,
-              "content": event.content.model_dump(exclude_none=True, mode="json"),
+              "content": event.content.model_dump(
+                  exclude_none=True, mode="json"
+              ),
               "timestamp": event.timestamp,
           },
       )
@@ -135,6 +139,7 @@ class FirestoreMemoryService(BaseMemoryService):
       if data and "content" in data:
         try:
           from google.genai import types
+
           content = types.Content.model_validate(data["content"])
           entries.append(
               MemoryEntry(
