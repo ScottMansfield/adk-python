@@ -18,6 +18,7 @@ from unittest import mock
 
 from google.adk.events.event import Event
 from google.adk.integrations.firestore.firestore_memory_service import FirestoreMemoryService
+from google.cloud.firestore_v1.base_query import FieldFilter
 from google.genai import types
 import pytest
 
@@ -94,7 +95,38 @@ async def test_search_memory_with_results(mock_firestore_client):
 
   mock_firestore_client.collection.assert_called_with("memories")
   collection_ref = mock_firestore_client.collection.return_value
-  collection_ref.where.assert_called()
+
+  assert collection_ref.where.call_count == 6
+  calls = collection_ref.where.call_args_list
+
+  app_name_calls = 0
+  user_id_calls = 0
+  keyword_calls = 0
+
+  for call in calls:
+    kwargs = call.kwargs
+    filt = kwargs.get("filter")
+    if filt:
+      if (
+          filt.field_path == "appName"
+          and filt.op_string == "=="
+          and filt.value == app_name
+      ):
+        app_name_calls += 1
+      elif (
+          filt.field_path == "userId"
+          and filt.op_string == "=="
+          and filt.value == user_id
+      ):
+        user_id_calls += 1
+      elif filt.field_path == "keywords" and filt.op_string == "array_contains":
+
+        if filt.value in ["quick", "fox"]:
+          keyword_calls += 1
+
+  assert app_name_calls == 2
+  assert user_id_calls == 2
+  assert keyword_calls == 2
 
 
 @pytest.mark.asyncio
@@ -167,3 +199,117 @@ async def test_search_memory_only_stop_words(mock_firestore_client):
   )
   assert not response.memories
   mock_firestore_client.collection.assert_not_called()
+
+
+def test_init_default_client():
+  with mock.patch("google.cloud.firestore.AsyncClient") as mock_client_class:
+    mock_instance = mock.MagicMock()
+    mock_client_class.return_value = mock_instance
+
+    service = FirestoreMemoryService()
+
+    mock_client_class.assert_called_once()
+    assert service.client == mock_instance
+
+
+@pytest.mark.asyncio
+async def test_add_session_to_memory(mock_firestore_client):
+  service = FirestoreMemoryService(client=mock_firestore_client)
+
+  from google.adk.sessions.session import Session
+
+  session = Session(id="test_session", app_name="test_app", user_id="test_user")
+
+  content = types.Content(parts=[types.Part.from_text(text="quick brown fox")])
+  event = Event(
+      invocation_id="test_inv",
+      author="user",
+      content=content,
+      timestamp=1234567890.0,
+  )
+  session.events.append(event)
+
+  batch = mock.MagicMock()
+  mock_firestore_client.batch.return_value = batch
+  batch.commit = mock.AsyncMock()
+
+  doc_ref = mock.MagicMock()
+  mock_firestore_client.collection.return_value.document.return_value = doc_ref
+
+  await service.add_session_to_memory(session)
+
+  mock_firestore_client.batch.assert_called_once()
+  mock_firestore_client.collection.assert_called_with("memories")
+  batch.set.assert_called_once()
+  batch.commit.assert_called_once()
+
+  args, kwargs = batch.set.call_args
+  assert args[0] == doc_ref
+  data = args[1]
+  assert data["appName"] == "test_app"
+  assert data["userId"] == "test_user"
+  assert "quick" in data["keywords"]
+  assert data["author"] == "user"
+  assert data["timestamp"] == 1234567890.0
+
+
+@pytest.mark.asyncio
+async def test_add_session_to_memory_no_events(mock_firestore_client):
+  service = FirestoreMemoryService(client=mock_firestore_client)
+
+  from google.adk.sessions.session import Session
+
+  session = Session(id="test_session", app_name="test_app", user_id="test_user")
+
+  batch = mock.MagicMock()
+  mock_firestore_client.batch.return_value = batch
+
+  await service.add_session_to_memory(session)
+
+  mock_firestore_client.batch.assert_called_once()
+  batch.set.assert_not_called()
+  batch.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_add_session_to_memory_no_keywords(mock_firestore_client):
+  service = FirestoreMemoryService(client=mock_firestore_client)
+
+  from google.adk.sessions.session import Session
+
+  session = Session(id="test_session", app_name="test_app", user_id="test_user")
+
+  content = types.Content(parts=[types.Part.from_text(text="the and or")])
+  event = Event(invocation_id="test_inv", author="user", content=content)
+  session.events.append(event)
+
+  batch = mock.MagicMock()
+  mock_firestore_client.batch.return_value = batch
+
+  await service.add_session_to_memory(session)
+
+  mock_firestore_client.batch.assert_called_once()
+  batch.set.assert_not_called()
+  batch.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_add_session_to_memory_commit_error(mock_firestore_client):
+  service = FirestoreMemoryService(client=mock_firestore_client)
+
+  from google.adk.sessions.session import Session
+
+  session = Session(id="test_session", app_name="test_app", user_id="test_user")
+
+  content = types.Content(parts=[types.Part.from_text(text="quick brown fox")])
+  event = Event(invocation_id="test_inv", author="user", content=content)
+  session.events.append(event)
+
+  batch = mock.MagicMock()
+  mock_firestore_client.batch.return_value = batch
+  batch.commit = mock.AsyncMock(
+      side_effect=Exception("Firestore commit failed")
+  )
+
+  with pytest.raises(Exception, match="Firestore commit failed"):
+    await service.add_session_to_memory(session)
