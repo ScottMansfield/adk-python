@@ -127,7 +127,9 @@ async def test_search_memory_deduplication(mock_firestore_client):
 
   get_mock = mock.AsyncMock(side_effect=[[doc_snapshot1], [doc_snapshot2]])
 
-  mock_firestore_client.collection_group.return_value.where.return_value.where.return_value.where.return_value.get = get_mock
+  mock_firestore_client.collection_group.return_value.where.return_value.where.return_value.where.return_value.get = (
+      get_mock
+  )
 
   response = await service.search_memory(
       app_name=app_name, user_id=user_id, query=query
@@ -145,7 +147,9 @@ async def test_search_memory_parsing_error(mock_firestore_client, caplog):
   user_id = "test_user"
   query = "quick"
 
-  doc_snapshot = mock_firestore_client.collection_group.return_value.where.return_value.where.return_value.where.return_value.get.return_value[0]
+  doc_snapshot = mock_firestore_client.collection_group.return_value.where.return_value.where.return_value.where.return_value.get.return_value[
+      0
+  ]
   doc_snapshot.to_dict.return_value = {"event_data": "invalid_data"}
 
   response = await service.search_memory(
@@ -164,4 +168,3 @@ async def test_search_memory_only_stop_words(mock_firestore_client):
   )
   assert not response.memories
   mock_firestore_client.collection_group.assert_not_called()
-

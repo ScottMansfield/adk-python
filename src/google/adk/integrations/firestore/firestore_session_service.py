@@ -64,7 +64,7 @@ class FirestoreSessionService(BaseSessionService):
 
     self.client = client or firestore.AsyncClient()
     self.root_collection = (
-         root_collection
+        root_collection
         or os.environ.get("ADK_FIRESTORE_ROOT_COLLECTION")
         or DEFAULT_ROOT_COLLECTION
     )
@@ -108,6 +108,7 @@ class FirestoreSessionService(BaseSessionService):
   ) -> Session:
     """Creates a new session in Firestore."""
     from google.cloud import firestore
+
     if not session_id:
       from ...platform import uuid as platform_uuid
 
@@ -283,7 +284,7 @@ class FirestoreSessionService(BaseSessionService):
     session_ref = self._get_sessions_ref(user_id).document(session_id)
 
     events_ref = session_ref.collection(self.events_collection)
-    
+
     batch = self.client.batch()
     count = 0
     async for event_doc in events_ref.stream():
@@ -303,7 +304,10 @@ class FirestoreSessionService(BaseSessionService):
   ) -> dict[str, Any]:
     """Atomically applies delta to app state inside a transaction."""
     from google.cloud import firestore
-    doc_ref = self.client.collection(self.app_state_collection).document(app_name)
+
+    doc_ref = self.client.collection(self.app_state_collection).document(
+        app_name
+    )
 
     @firestore.async_transactional
     async def _txn(transaction):
@@ -321,6 +325,7 @@ class FirestoreSessionService(BaseSessionService):
   ) -> dict[str, Any]:
     """Atomically applies delta to user state inside a transaction."""
     from google.cloud import firestore
+
     doc_ref = (
         self.client.collection(self.user_state_collection)
         .document(app_name)
@@ -342,6 +347,7 @@ class FirestoreSessionService(BaseSessionService):
   async def append_event(self, session: Session, event: Event) -> Event:
     """Appends an event to a session in Firestore."""
     from google.cloud import firestore
+
     if event.partial:
       return event
 
@@ -365,10 +371,14 @@ class FirestoreSessionService(BaseSessionService):
           session_updates[key] = value
 
       if app_updates:
-        await self._update_app_state_transactional(session.app_name, app_updates)
+        await self._update_app_state_transactional(
+            session.app_name, app_updates
+        )
 
       if user_updates:
-        await self._update_user_state_transactional(session.app_name, session.user_id, user_updates)
+        await self._update_user_state_transactional(
+            session.app_name, session.user_id, user_updates
+        )
 
       for k, v in session_updates.items():
         session.state[k] = v

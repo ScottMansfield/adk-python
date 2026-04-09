@@ -302,8 +302,8 @@ async def test_list_sessions_without_user_id(mock_firestore_client):
       "state": {"session_key": "session_val"},
   }
 
-  mock_firestore_client.collection_group.return_value.where.return_value.get = mock.AsyncMock(
-      return_value=[session_doc]
+  mock_firestore_client.collection_group.return_value.where.return_value.get = (
+      mock.AsyncMock(return_value=[session_doc])
   )
 
   app_state_coll = mock.MagicMock()
@@ -349,7 +349,9 @@ async def test_create_session_already_exists(mock_firestore_client):
   app_name = "test_app"
   user_id = "test_user"
 
-  doc_snapshot = mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value
+  doc_snapshot = (
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value
+  )
   doc_snapshot.exists = True
 
   from google.adk.errors.already_exists_error import AlreadyExistsError
@@ -367,7 +369,9 @@ async def test_get_session_with_config(mock_firestore_client):
   user_id = "test_user"
   session_id = "test_session"
 
-  doc_snapshot = mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value
+  doc_snapshot = (
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value
+  )
   doc_snapshot.exists = True
   doc_snapshot.to_dict.return_value = {
       "id": session_id,
@@ -375,7 +379,9 @@ async def test_get_session_with_config(mock_firestore_client):
       "userId": user_id,
   }
 
-  events_collection_ref = mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+  events_collection_ref = (
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+  )
 
   from google.adk.sessions.base_session_service import GetSessionConfig
 
@@ -396,7 +402,9 @@ async def test_delete_session_batching(mock_firestore_client):
   user_id = "test_user"
   session_id = "test_session"
 
-  events_ref = mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+  events_ref = (
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+  )
 
   dummy_docs = [mock.MagicMock() for _ in range(501)]
 
@@ -428,4 +436,3 @@ async def test_append_event_partial(mock_firestore_client):
 
   assert result == event
   mock_firestore_client.batch.assert_not_called()
-

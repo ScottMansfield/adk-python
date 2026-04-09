@@ -35,7 +35,9 @@ def test_create_firestore_runner_with_arg(mock_agent, monkeypatch):
       mock.patch(
           "google.adk.integrations.firestore.firestore_database_runner.FirestoreSessionService"
       ),
-      mock.patch("google.adk.integrations.firestore.firestore_database_runner.FirestoreMemoryService"),
+      mock.patch(
+          "google.adk.integrations.firestore.firestore_database_runner.FirestoreMemoryService"
+      ),
       mock.patch(
           "google.adk.integrations.firestore.firestore_database_runner.GcsArtifactService"
       ) as mock_gcs,
@@ -53,7 +55,9 @@ def test_create_firestore_runner_with_env(mock_agent, monkeypatch):
       mock.patch(
           "google.adk.integrations.firestore.firestore_database_runner.FirestoreSessionService"
       ),
-      mock.patch("google.adk.integrations.firestore.firestore_database_runner.FirestoreMemoryService"),
+      mock.patch(
+          "google.adk.integrations.firestore.firestore_database_runner.FirestoreMemoryService"
+      ),
       mock.patch(
           "google.adk.integrations.firestore.firestore_database_runner.GcsArtifactService"
       ) as mock_gcs,
@@ -80,8 +84,12 @@ def test_create_firestore_runner_with_root_collection(mock_agent, monkeypatch):
       mock.patch(
           "google.adk.integrations.firestore.firestore_database_runner.FirestoreSessionService"
       ) as mock_session,
-      mock.patch("google.adk.integrations.firestore.firestore_database_runner.FirestoreMemoryService"),
-      mock.patch("google.adk.integrations.firestore.firestore_database_runner.GcsArtifactService"),
+      mock.patch(
+          "google.adk.integrations.firestore.firestore_database_runner.FirestoreMemoryService"
+      ),
+      mock.patch(
+          "google.adk.integrations.firestore.firestore_database_runner.GcsArtifactService"
+      ),
   ):
     runner = create_firestore_runner(
         mock_agent, firestore_root_collection="custom_collection"
@@ -89,4 +97,3 @@ def test_create_firestore_runner_with_root_collection(mock_agent, monkeypatch):
 
     assert runner is not None
     mock_session.assert_called_once_with(root_collection="custom_collection")
-
