@@ -28,31 +28,35 @@ def mock_firestore_client():
   doc_ref = mock.MagicMock()
   subcollection_ref = mock.MagicMock()
   subdoc_ref = mock.MagicMock()
+  sessions_coll_ref = mock.MagicMock()
+  sessions_doc_ref = mock.MagicMock()
 
   client.collection.return_value = collection_ref
   collection_ref.document.return_value = doc_ref
   doc_ref.collection.return_value = subcollection_ref
   subcollection_ref.document.return_value = subdoc_ref
+  subdoc_ref.collection.return_value = sessions_coll_ref
+  sessions_coll_ref.document.return_value = sessions_doc_ref
 
   doc_snapshot = mock.MagicMock()
   doc_snapshot.exists = False
   doc_snapshot.to_dict.return_value = {}
 
-  doc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
   subdoc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
+  sessions_doc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
 
-  subdoc_ref.set = mock.AsyncMock()
-  subdoc_ref.delete = mock.AsyncMock()
+  sessions_doc_ref.set = mock.AsyncMock()
+  sessions_doc_ref.delete = mock.AsyncMock()
 
   events_collection_ref = mock.MagicMock()
-  subdoc_ref.collection.return_value = events_collection_ref
+  sessions_doc_ref.collection.return_value = events_collection_ref
   events_collection_ref.order_by.return_value = events_collection_ref
   events_collection_ref.where.return_value = events_collection_ref
   events_collection_ref.limit_to_last.return_value = events_collection_ref
   events_collection_ref.get = mock.AsyncMock(return_value=[])
 
-  subcollection_ref.get = mock.AsyncMock(return_value=[])
-  subcollection_ref.where.return_value = subcollection_ref
+  sessions_coll_ref.get = mock.AsyncMock(return_value=[])
+  sessions_coll_ref.where.return_value = sessions_coll_ref
 
   client.collection_group.return_value = collection_ref
 
@@ -92,11 +96,15 @@ async def test_create_session(mock_firestore_client):
   assert session.id
 
   mock_firestore_client.collection.assert_called_once_with("adk-session")
-  collection_ref = mock_firestore_client.collection.return_value
-  collection_ref.document.assert_called_once_with(user_id)
-  doc_ref = collection_ref.document.return_value
-  doc_ref.collection.assert_called_once_with("sessions")
-  sessions_ref = doc_ref.collection.return_value
+  root_coll = mock_firestore_client.collection.return_value
+  root_coll.document.assert_called_once_with(app_name)
+  app_ref = root_coll.document.return_value
+  app_ref.collection.assert_called_once_with("users")
+  users_coll = app_ref.collection.return_value
+  users_coll.document.assert_called_once_with(user_id)
+  user_ref = users_coll.document.return_value
+  user_ref.collection.assert_called_once_with("sessions")
+  sessions_ref = user_ref.collection.return_value
   sessions_ref.document.assert_called_once_with(session.id)
   session_doc_ref = sessions_ref.document.return_value
   from google.cloud import firestore
@@ -125,11 +133,15 @@ async def test_get_session_not_found(mock_firestore_client):
   assert session is None
 
   mock_firestore_client.collection.assert_called_with("adk-session")
-  collection_ref = mock_firestore_client.collection.return_value
-  collection_ref.document.assert_called_with(user_id)
-  doc_ref = collection_ref.document.return_value
-  doc_ref.collection.assert_called_with("sessions")
-  sessions_ref = doc_ref.collection.return_value
+  root_coll = mock_firestore_client.collection.return_value
+  root_coll.document.assert_called_with(app_name)
+  app_ref = root_coll.document.return_value
+  app_ref.collection.assert_called_with("users")
+  users_coll = app_ref.collection.return_value
+  users_coll.document.assert_called_with(user_id)
+  user_ref = users_coll.document.return_value
+  user_ref.collection.assert_called_with("sessions")
+  sessions_ref = user_ref.collection.return_value
   sessions_ref.document.assert_called_with(session_id)
 
 
@@ -153,7 +165,7 @@ async def test_get_session_found(mock_firestore_client):
   }
 
   events_collection_ref = (
-      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
   )
   event_doc = mock.MagicMock()
   event_doc.to_dict.return_value = {
@@ -180,7 +192,7 @@ async def test_delete_session(mock_firestore_client):
   session_id = "test_session"
 
   events_ref = (
-      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
   )
   event_doc = mock.AsyncMock()
 
@@ -201,7 +213,7 @@ async def test_delete_session(mock_firestore_client):
   batch.commit.assert_called_once()
 
   session_doc_ref = (
-      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value.document.return_value
   )
   session_doc_ref.delete.assert_called_once()
 
@@ -334,10 +346,14 @@ async def test_list_sessions_with_user_id(mock_firestore_client):
   users_coll.document.return_value = user_doc_ref
   user_doc_ref.get = mock.AsyncMock(return_value=user_doc)
 
-  user_doc_in_sessions = mock.MagicMock()
-  sessions_coll.document.return_value = user_doc_in_sessions
+  app_doc_in_root = mock.MagicMock()
+  sessions_coll.document.return_value = app_doc_in_root
+  users_coll = mock.MagicMock()
+  app_doc_in_root.collection.return_value = users_coll
+  user_doc_in_users = mock.MagicMock()
+  users_coll.document.return_value = user_doc_in_users
   sessions_subcoll = mock.MagicMock()
-  user_doc_in_sessions.collection.return_value = sessions_subcoll
+  user_doc_in_users.collection.return_value = sessions_subcoll
   sessions_query = mock.MagicMock()
   sessions_subcoll.where.return_value = sessions_query
   sessions_query.get = mock.AsyncMock(return_value=[session_doc])
@@ -448,7 +464,7 @@ async def test_get_session_with_config(mock_firestore_client):
   }
 
   events_collection_ref = (
-      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
   )
 
   from google.adk.sessions.base_session_service import GetSessionConfig
@@ -471,7 +487,7 @@ async def test_delete_session_batching(mock_firestore_client):
   session_id = "test_session"
 
   events_ref = (
-      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
   )
 
   dummy_docs = [mock.MagicMock() for _ in range(501)]
@@ -631,10 +647,14 @@ async def test_list_sessions_missing_states(mock_firestore_client):
   users_coll.document.return_value = user_doc_ref
   user_doc_ref.get = mock.AsyncMock(return_value=user_doc)
 
-  user_doc_in_sessions = mock.MagicMock()
-  sessions_coll.document.return_value = user_doc_in_sessions
+  app_doc_in_root = mock.MagicMock()
+  sessions_coll.document.return_value = app_doc_in_root
+  users_coll = mock.MagicMock()
+  app_doc_in_root.collection.return_value = users_coll
+  user_doc_in_users = mock.MagicMock()
+  users_coll.document.return_value = user_doc_in_users
   sessions_subcoll = mock.MagicMock()
-  user_doc_in_sessions.collection.return_value = sessions_subcoll
+  user_doc_in_users.collection.return_value = sessions_subcoll
   sessions_query = mock.MagicMock()
   sessions_subcoll.where.return_value = sessions_query
   sessions_query.get = mock.AsyncMock(return_value=[session_doc])

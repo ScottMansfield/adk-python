@@ -46,14 +46,16 @@ DEFAULT_USER_STATE_COLLECTION = "user_states"
 class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
   """Session service that uses Google Cloud Firestore as the backend.
 
-  It creates a hierarchy in Firestore to hold events by user and session:
+  It creates a hierarchy in Firestore to hold events by app, user, and session:
   adk-session
-  ↳ <user ID>
-    ↳ sessions
-      ↳ <session ID>
-        ↳ events
-          ↳ <event ID>
-            ↳ Event document
+  ↳ <app name>
+    ↳ users
+      ↳ <user ID>
+        ↳ sessions
+          ↳ <session ID>
+            ↳ events
+              ↳ <event ID>
+                ↳ Event document
   """
 
   def __init__(
@@ -105,10 +107,12 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
     return merged_state
 
   def _get_sessions_ref(
-      self, user_id: str
+      self, app_name: str, user_id: str
   ) -> firestore.AsyncCollectionReference:
     return (
         self.client.collection(self.root_collection)
+        .document(app_name)
+        .collection("users")
         .document(user_id)
         .collection(self.sessions_collection)
     )
@@ -132,7 +136,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
     initial_state = state or {}
     now = firestore.SERVER_TIMESTAMP
 
-    session_ref = self._get_sessions_ref(user_id).document(session_id)
+    session_ref = self._get_sessions_ref(app_name, user_id).document(session_id)
 
     # Check if session already exists
     doc = await session_ref.get()
@@ -176,7 +180,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
       config: Optional[GetSessionConfig] = None,
   ) -> Optional[Session]:
     """Gets a session from Firestore."""
-    session_ref = self._get_sessions_ref(user_id).document(session_id)
+    session_ref = self._get_sessions_ref(app_name, user_id).document(session_id)
     doc = await session_ref.get()
 
     if not doc.exists:
@@ -234,7 +238,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
   ) -> ListSessionsResponse:
     """Lists sessions from Firestore."""
     if user_id:
-      query = self._get_sessions_ref(user_id).where("appName", "==", app_name)
+      query = self._get_sessions_ref(app_name, user_id).where("appName", "==", app_name)
       docs = await query.get()
     else:
       query = self.client.collection_group(self.sessions_collection).where(
@@ -296,7 +300,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
       self, *, app_name: str, user_id: str, session_id: str
   ) -> None:
     """Deletes a session and its events from Firestore."""
-    session_ref = self._get_sessions_ref(user_id).document(session_id)
+    session_ref = self._get_sessions_ref(app_name, user_id).document(session_id)
 
     events_ref = session_ref.collection(self.events_collection)
 
@@ -369,7 +373,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
     self._apply_temp_state(session, event)
     event = self._trim_temp_delta_state(event)
 
-    session_ref = self._get_sessions_ref(session.user_id).document(session.id)
+    session_ref = self._get_sessions_ref(session.app_name, session.user_id).document(session.id)
 
     if event.actions and event.actions.state_delta:
       state_delta = event.actions.state_delta
