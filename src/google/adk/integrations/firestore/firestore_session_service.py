@@ -29,10 +29,12 @@ if TYPE_CHECKING:
 from pydantic import BaseModel
 
 from ...events.event import Event
+from ...sessions import _session_util
 from ...sessions.base_session_service import BaseSessionService
 from ...sessions.base_session_service import GetSessionConfig
 from ...sessions.base_session_service import ListSessionsResponse
 from ...sessions.session import Session
+from ...sessions.state import State
 
 logger = logging.getLogger("google_adk." + __name__)
 
@@ -46,7 +48,7 @@ DEFAULT_USER_STATE_COLLECTION = "user_states"
 class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
   """Session service that uses Google Cloud Firestore as the backend.
 
-  It creates a hierarchy in Firestore to hold events by app, user, and session:
+  Hierarchy for sessions:
   adk-session
   ↳ <app name>
     ↳ users
@@ -55,7 +57,15 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
           ↳ <session ID>
             ↳ events
               ↳ <event ID>
-                ↳ Event document
+
+  Hierarchy for shared App/User state configurations:
+  app_states
+  ↳ <app name>
+
+  user_states
+  ↳ <app name>
+    ↳ users
+      ↳ <user ID>
   """
 
   def __init__(
@@ -101,9 +111,9 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
 
     merged_state = copy.deepcopy(session_state)
     for key, value in app_state.items():
-      merged_state["_app_" + key] = value
+      merged_state[State.APP_PREFIX + key] = value
     for key, value in user_state.items():
-      merged_state["_user_" + key] = value
+      merged_state[State.USER_PREFIX + key] = value
     return merged_state
 
   def _get_sessions_ref(
@@ -138,38 +148,91 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
 
     session_ref = self._get_sessions_ref(app_name, user_id).document(session_id)
 
+    # Extract state deltas
+    state_deltas = _session_util.extract_state_delta(initial_state)
+    app_state_delta = state_deltas["app"]
+    user_state_delta = state_deltas["user"]
+    session_state = state_deltas["session"]
+
+    app_ref = self.client.collection(self.app_state_collection).document(
+        app_name
+    )
+    user_ref = (
+        self.client.collection(self.user_state_collection)
+        .document(app_name)
+        .collection("users")
+        .document(user_id)
+    )
+
     session_data = {
         "id": session_id,
         "appName": app_name,
         "userId": user_id,
-        "state": initial_state,
+        "state": session_state,
         "createTime": now,
         "updateTime": now,
     }
 
     @firestore.async_transactional  # type: ignore[untyped-decorator]
     async def _create_txn(transaction: firestore.AsyncTransaction) -> None:
+      # 1. Reads
       snap = await session_ref.get(transaction=transaction)
       if snap.exists:
         from ...errors.already_exists_error import AlreadyExistsError
 
         raise AlreadyExistsError(f"Session {session_id} already exists.")
+
+      app_snap = (
+          await app_ref.get(transaction=transaction)
+          if app_state_delta
+          else None
+      )
+      user_snap = (
+          await user_ref.get(transaction=transaction)
+          if user_state_delta
+          else None
+      )
+
+      # 2. Writes
+      if app_state_delta:
+        current_app = (
+            app_snap.to_dict() if (app_snap and app_snap.exists) else {}
+        )
+        current_app.update(app_state_delta)
+        transaction.set(app_ref, current_app, merge=True)
+
+      if user_state_delta:
+        current_user = (
+            user_snap.to_dict() if (user_snap and user_snap.exists) else {}
+        )
+        current_user.update(user_state_delta)
+        transaction.set(user_ref, current_user, merge=True)
+
       transaction.set(session_ref, session_data)
 
     transaction_obj = self.client.transaction()
     await _create_txn(transaction_obj)
 
-    # We need a timestamp for the Session object. Since SERVER_TIMESTAMP is
-    # evaluated on the server, we might want to use local time for the object
-    # or read it back. Reading it back is expensive. We'll use local time for
-    # the object, but the DB will have SERVER_TIMESTAMP.
+    storage_app_doc = await app_ref.get()
+    storage_app_state = (
+        storage_app_doc.to_dict() if storage_app_doc.exists else {}
+    )
+    storage_user_doc = await user_ref.get()
+    storage_user_state = (
+        storage_user_doc.to_dict() if storage_user_doc.exists else {}
+    )
+
+    merged_state = self._merge_state(
+        storage_app_state, storage_user_state, session_state
+    )
+
     local_now = datetime.now(timezone.utc).timestamp()
 
     return Session(
         id=session_id,
         app_name=app_name,
         user_id=user_id,
-        state=initial_state,
+        state=merged_state,
         events=[],
         last_update_time=local_now,
     )
@@ -215,6 +278,23 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
     # Let's continue getting session.
     session_state = data.get("state", {})
 
+    # Fetch shared state
+    app_ref = self.client.collection(self.app_state_collection).document(
+        app_name
+    )
+    user_ref = (
+        self.client.collection(self.user_state_collection)
+        .document(app_name)
+        .collection("users")
+        .document(user_id)
+    )
+    app_doc = await app_ref.get()
+    app_state = app_doc.to_dict() if app_doc.exists else {}
+    user_doc = await user_ref.get()
+    user_state = user_doc.to_dict() if user_doc.exists else {}
+
+    merged_state = self._merge_state(app_state, user_state, session_state)
+
     # Convert timestamp
     update_time = data.get("updateTime")
     last_update_time = 0.0
@@ -231,7 +311,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         id=session_id,
         app_name=app_name,
         user_id=user_id,
-        state=session_state,
+        state=merged_state,
         events=events,
         last_update_time=last_update_time,
     )
@@ -339,17 +419,10 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
 
     if event.actions and event.actions.state_delta:
       state_delta = event.actions.state_delta
-      app_updates = {}
-      user_updates = {}
-      session_updates = {}
-
-      for key, value in state_delta.items():
-        if key.startswith("_app_"):
-          app_updates[key[len("_app_") :]] = value
-        elif key.startswith("_user_"):
-          user_updates[key[len("_user_") :]] = value
-        else:
-          session_updates[key] = value
+      state_deltas = _session_util.extract_state_delta(state_delta)
+      app_updates = state_deltas["app"]
+      user_updates = state_deltas["user"]
+      session_updates = state_deltas["session"]
 
       app_ref = self.client.collection(self.app_state_collection).document(
           session.app_name

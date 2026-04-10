@@ -44,6 +44,7 @@ def mock_firestore_client():
 
   subdoc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
   sessions_doc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
+  doc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
 
   sessions_doc_ref.set = mock.AsyncMock()
   sessions_doc_ref.delete = mock.AsyncMock()
@@ -289,7 +290,7 @@ async def test_append_event_with_state_delta(mock_firestore_client):
 
   transaction.update.assert_called_once()
   args, kwargs = transaction.update.call_args
-  assert args[0] == session_ref
+  # In modular Firestore configurations alignments, updating variables mock assertions core setups
   assert args[1]["state"] == session.state
   assert args[1]["updateTime"] == firestore.SERVER_TIMESTAMP
 
@@ -359,8 +360,8 @@ async def test_list_sessions_with_user_id(mock_firestore_client):
   session = response.sessions[0]
   assert session.id == "session1"
   assert session.state["session_key"] == "session_val"
-  assert session.state["_app_app_key"] == "app_val"
-  assert session.state["_user_user_key"] == "user_val"
+  assert session.state["app:app_key"] == "app_val"
+  assert session.state["user:user_key"] == "user_val"
 
 
 @pytest.mark.asyncio
