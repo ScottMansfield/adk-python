@@ -152,6 +152,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
       snap = await session_ref.get(transaction=transaction)
       if snap.exists:
         from ...errors.already_exists_error import AlreadyExistsError
+
         raise AlreadyExistsError(f"Session {session_id} already exists.")
       transaction.set(session_ref, session_data)
 
@@ -240,7 +241,9 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
   ) -> ListSessionsResponse:
     """Lists sessions from Firestore."""
     if user_id:
-      query = self._get_sessions_ref(app_name, user_id).where("appName", "==", app_name)
+      query = self._get_sessions_ref(app_name, user_id).where(
+          "appName", "==", app_name
+      )
       docs = await query.get()
     else:
       query = self.client.collection_group(self.sessions_collection).where(
@@ -320,52 +323,6 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
 
     await session_ref.delete()
 
-
-  async def _update_app_state_transactional(
-      self, app_name: str, delta: dict[str, Any]
-  ) -> dict[str, Any]:
-    """Atomically applies delta to app state inside a transaction."""
-    from google.cloud import firestore
-
-    doc_ref = self.client.collection(self.app_state_collection).document(
-        app_name
-    )
-
-    @firestore.async_transactional  # type: ignore[untyped-decorator]
-    async def _txn(transaction: firestore.AsyncTransaction) -> dict[str, Any]:
-      snap = await doc_ref.get(transaction=transaction)
-      current = snap.to_dict() if snap.exists else {}
-      current.update(delta)
-      transaction.set(doc_ref, current, merge=True)
-      return current
-
-    transaction = self.client.transaction()
-    return cast(dict[str, Any], await _txn(transaction))
-
-  async def _update_user_state_transactional(
-      self, app_name: str, user_id: str, delta: dict[str, Any]
-  ) -> dict[str, Any]:
-    """Atomically applies delta to user state inside a transaction."""
-    from google.cloud import firestore
-
-    doc_ref = (
-        self.client.collection(self.user_state_collection)
-        .document(app_name)
-        .collection("users")
-        .document(user_id)
-    )
-
-    @firestore.async_transactional  # type: ignore[untyped-decorator]
-    async def _txn(transaction: firestore.AsyncTransaction) -> dict[str, Any]:
-      snap = await doc_ref.get(transaction=transaction)
-      current = snap.to_dict() if snap.exists else {}
-      current.update(delta)
-      transaction.set(doc_ref, current, merge=True)
-      return current
-
-    transaction = self.client.transaction()
-    return cast(dict[str, Any], await _txn(transaction))
-
   async def append_event(self, session: Session, event: Event) -> Event:
     """Appends an event to a session in Firestore."""
     from google.cloud import firestore
@@ -376,7 +333,9 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
     self._apply_temp_state(session, event)
     event = self._trim_temp_delta_state(event)
 
-    session_ref = self._get_sessions_ref(session.app_name, session.user_id).document(session.id)
+    session_ref = self._get_sessions_ref(
+        session.app_name, session.user_id
+    ).document(session.id)
 
     if event.actions and event.actions.state_delta:
       state_delta = event.actions.state_delta
@@ -392,7 +351,9 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         else:
           session_updates[key] = value
 
-      app_ref = self.client.collection(self.app_state_collection).document(session.app_name)
+      app_ref = self.client.collection(self.app_state_collection).document(
+          session.app_name
+      )
       user_ref = (
           self.client.collection(self.user_state_collection)
           .document(session.app_name)
@@ -403,8 +364,14 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
       @firestore.async_transactional  # type: ignore[untyped-decorator]
       async def _append_txn(transaction: firestore.AsyncTransaction) -> None:
         # 1. Reads
-        app_snap = await app_ref.get(transaction=transaction) if app_updates else None
-        user_snap = await user_ref.get(transaction=transaction) if user_updates else None
+        app_snap = (
+            await app_ref.get(transaction=transaction) if app_updates else None
+        )
+        user_snap = (
+            await user_ref.get(transaction=transaction)
+            if user_updates
+            else None
+        )
 
         # 2. Writes
         if app_updates and app_snap is not None:
@@ -429,7 +396,9 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         )
 
         event_id = event.id
-        event_ref = session_ref.collection(self.events_collection).document(event_id)
+        event_ref = session_ref.collection(self.events_collection).document(
+            event_id
+        )
         event_data = event.model_dump(exclude_none=True, mode="json")
         transaction.set(
             event_ref,

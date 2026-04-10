@@ -577,62 +577,7 @@ async def test_append_event_partial(mock_firestore_client):
 
 
 @pytest.mark.asyncio
-async def test_update_app_state_transactional(mock_firestore_client):
-  service = FirestoreSessionService(client=mock_firestore_client)
 
-  app_name = "test_app"
-  delta = {"new_key": "new_val"}
-
-  transaction = mock.MagicMock()
-  mock_firestore_client.transaction.return_value = transaction
-
-  doc_ref = mock.MagicMock()
-  mock_firestore_client.collection.return_value.document.return_value = doc_ref
-
-  doc_snapshot = mock.MagicMock()
-  doc_snapshot.exists = True
-  doc_snapshot.to_dict.return_value = {"old_key": "old_val"}
-  doc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
-
-  with mock.patch("google.cloud.firestore.async_transactional", lambda x: x):
-    result = await service._update_app_state_transactional(app_name, delta)
-
-  assert result == {"old_key": "old_val", "new_key": "new_val"}
-  transaction.set.assert_called_once_with(
-      doc_ref, {"old_key": "old_val", "new_key": "new_val"}, merge=True
-  )
-
-
-@pytest.mark.asyncio
-async def test_update_user_state_transactional(mock_firestore_client):
-  service = FirestoreSessionService(client=mock_firestore_client)
-
-  app_name = "test_app"
-  user_id = "test_user"
-  delta = {"new_key": "new_val"}
-
-  transaction = mock.MagicMock()
-  mock_firestore_client.transaction.return_value = transaction
-
-  doc_ref = mock.MagicMock()
-  mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value = (
-      doc_ref
-  )
-
-  doc_snapshot = mock.MagicMock()
-  doc_snapshot.exists = True
-  doc_snapshot.to_dict.return_value = {"old_key": "old_val"}
-  doc_ref.get = mock.AsyncMock(return_value=doc_snapshot)
-
-  with mock.patch("google.cloud.firestore.async_transactional", lambda x: x):
-    result = await service._update_user_state_transactional(
-        app_name, user_id, delta
-    )
-
-  assert result == {"old_key": "old_val", "new_key": "new_val"}
-  transaction.set.assert_called_once_with(
-      doc_ref, {"old_key": "old_val", "new_key": "new_val"}, merge=True
-  )
 
 
 @pytest.mark.asyncio
