@@ -138,13 +138,6 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
 
     session_ref = self._get_sessions_ref(app_name, user_id).document(session_id)
 
-    # Check if session already exists
-    doc = await session_ref.get()
-    if doc.exists:
-      from ...errors.already_exists_error import AlreadyExistsError
-
-      raise AlreadyExistsError(f"Session {session_id} already exists.")
-
     session_data = {
         "id": session_id,
         "appName": app_name,
@@ -154,7 +147,16 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         "updateTime": now,
     }
 
-    await session_ref.set(session_data)
+    @firestore.async_transactional  # type: ignore[untyped-decorator]
+    async def _create_txn(transaction: firestore.AsyncTransaction) -> None:
+      snap = await session_ref.get(transaction=transaction)
+      if snap.exists:
+        from ...errors.already_exists_error import AlreadyExistsError
+        raise AlreadyExistsError(f"Session {session_id} already exists.")
+      transaction.set(session_ref, session_data)
+
+    transaction_obj = self.client.transaction()
+    await _create_txn(transaction_obj)
 
     # We need a timestamp for the Session object. Since SERVER_TIMESTAMP is
     # evaluated on the server, we might want to use local time for the object
@@ -318,6 +320,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
 
     await session_ref.delete()
 
+
   async def _update_app_state_transactional(
       self, app_name: str, delta: dict[str, Any]
   ) -> dict[str, Any]:
@@ -389,44 +392,57 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         else:
           session_updates[key] = value
 
-      if app_updates:
-        await self._update_app_state_transactional(
-            session.app_name, app_updates
+      app_ref = self.client.collection(self.app_state_collection).document(session.app_name)
+      user_ref = (
+          self.client.collection(self.user_state_collection)
+          .document(session.app_name)
+          .collection("users")
+          .document(session.user_id)
+      )
+
+      @firestore.async_transactional  # type: ignore[untyped-decorator]
+      async def _append_txn(transaction: firestore.AsyncTransaction) -> None:
+        # 1. Reads
+        app_snap = await app_ref.get(transaction=transaction) if app_updates else None
+        user_snap = await user_ref.get(transaction=transaction) if user_updates else None
+
+        # 2. Writes
+        if app_updates and app_snap is not None:
+          current_app = app_snap.to_dict() if app_snap.exists else {}
+          current_app.update(app_updates)
+          transaction.set(app_ref, current_app, merge=True)
+
+        if user_updates and user_snap is not None:
+          current_user = user_snap.to_dict() if user_snap.exists else {}
+          current_user.update(user_updates)
+          transaction.set(user_ref, current_user, merge=True)
+
+        for k, v in session_updates.items():
+          session.state[k] = v
+
+        transaction.update(
+            session_ref,
+            {
+                "state": session.state,
+                "updateTime": firestore.SERVER_TIMESTAMP,
+            },
         )
 
-      if user_updates:
-        await self._update_user_state_transactional(
-            session.app_name, session.user_id, user_updates
+        event_id = event.id
+        event_ref = session_ref.collection(self.events_collection).document(event_id)
+        event_data = event.model_dump(exclude_none=True, mode="json")
+        transaction.set(
+            event_ref,
+            {
+                "event_data": event_data,
+                "timestamp": firestore.SERVER_TIMESTAMP,
+                "appName": session.app_name,
+                "userId": session.user_id,
+            },
         )
 
-      for k, v in session_updates.items():
-        session.state[k] = v
-
-      batch = self.client.batch()
-      batch.update(
-          session_ref,
-          {
-              "state": session.state,
-              "updateTime": firestore.SERVER_TIMESTAMP,
-          },
-      )
-
-      event_id = event.id
-      event_ref = session_ref.collection(self.events_collection).document(
-          event_id
-      )
-      event_data = event.model_dump(exclude_none=True, mode="json")
-      batch.set(
-          event_ref,
-          {
-              "event_data": event_data,
-              "timestamp": firestore.SERVER_TIMESTAMP,
-              "appName": session.app_name,
-              "userId": session.user_id,
-          },
-      )
-
-      await batch.commit()
+      transaction_obj = self.client.transaction()
+      await _append_txn(transaction_obj)
     else:
       batch = self.client.batch()
       event_id = event.id

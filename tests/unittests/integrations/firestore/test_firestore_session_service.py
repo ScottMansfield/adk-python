@@ -89,7 +89,8 @@ async def test_create_session(mock_firestore_client):
   app_name = "test_app"
   user_id = "test_user"
 
-  session = await service.create_session(app_name=app_name, user_id=user_id)
+  with mock.patch("google.cloud.firestore.async_transactional", lambda x: x):
+    session = await service.create_session(app_name=app_name, user_id=user_id)
 
   assert session.app_name == app_name
   assert session.user_id == user_id
@@ -109,14 +110,16 @@ async def test_create_session(mock_firestore_client):
   session_doc_ref = sessions_ref.document.return_value
   from google.cloud import firestore
 
-  session_doc_ref.set.assert_called_once()
-  args, kwargs = session_doc_ref.set.call_args
-  assert args[0]["id"] == session.id
-  assert args[0]["appName"] == app_name
-  assert args[0]["userId"] == user_id
-  assert args[0]["state"] == {}
-  assert args[0]["createTime"] == firestore.SERVER_TIMESTAMP
-  assert args[0]["updateTime"] == firestore.SERVER_TIMESTAMP
+  transaction = mock_firestore_client.transaction.return_value
+  transaction.set.assert_called_once()
+  args, kwargs = transaction.set.call_args
+  assert args[0] == session_doc_ref
+  assert args[1]["id"] == session.id
+  assert args[1]["appName"] == app_name
+  assert args[1]["userId"] == user_id
+  assert args[1]["state"] == {}
+  assert args[1]["createTime"] == firestore.SERVER_TIMESTAMP
+  assert args[1]["updateTime"] == firestore.SERVER_TIMESTAMP
 
 
 @pytest.mark.asyncio
@@ -228,7 +231,8 @@ async def test_append_event(mock_firestore_client):
   session = Session(id="test_session", app_name=app_name, user_id=user_id)
   event = Event(invocation_id="test_inv", author="user")
 
-  await service.append_event(session, event)
+  with mock.patch("google.cloud.firestore.async_transactional", lambda x: x):
+    await service.append_event(session, event)
 
   from google.cloud import firestore
 
@@ -273,30 +277,21 @@ async def test_append_event_with_state_delta(mock_firestore_client):
   service._update_app_state_transactional = mock.AsyncMock()
   service._update_user_state_transactional = mock.AsyncMock()
 
-  await service.append_event(session, event)
+  with mock.patch("google.cloud.firestore.async_transactional", lambda x: x):
+    await service.append_event(session, event)
 
-  mock_firestore_client.batch.assert_called_once()
-  service._update_app_state_transactional.assert_called_once_with(
-      "test_app", {"my_key": "app_val"}
-  )
-  service._update_user_state_transactional.assert_called_once_with(
-      "test_app", "test_user", {"my_key": "user_val"}
-  )
-
-  batch = mock_firestore_client.batch.return_value
-
-  batch.set.assert_called()
+  transaction = mock_firestore_client.transaction.return_value
+  transaction.set.assert_called()
 
   assert session.state["session_key"] == "session_val"
 
   from google.cloud import firestore
 
-  batch.update.assert_called_once()
-  args, kwargs = batch.update.call_args
+  transaction.update.assert_called_once()
+  args, kwargs = transaction.update.call_args
+  assert args[0] == session_ref
   assert args[1]["state"] == session.state
   assert args[1]["updateTime"] == firestore.SERVER_TIMESTAMP
-
-  batch.commit.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -497,10 +492,11 @@ async def test_create_session_already_exists(mock_firestore_client):
 
   from google.adk.errors.already_exists_error import AlreadyExistsError
 
-  with pytest.raises(AlreadyExistsError):
-    await service.create_session(
-        app_name=app_name, user_id=user_id, session_id="existing_id"
-    )
+  with mock.patch("google.cloud.firestore.async_transactional", lambda x: x):
+    with pytest.raises(AlreadyExistsError):
+      await service.create_session(
+          app_name=app_name, user_id=user_id, session_id="existing_id"
+      )
 
 
 @pytest.mark.asyncio
