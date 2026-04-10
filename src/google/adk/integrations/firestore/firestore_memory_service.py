@@ -86,7 +86,7 @@ class FirestoreMemoryService(BaseMemoryService):
   async def add_session_to_memory(self, session: Session) -> None:
     """Extracts keywords from session events and stores them in the memories collection."""
     batch = self.client.batch()
-    has_updates = False
+    count = 0
 
     for event in session.events:
       if not event.content or not event.content.parts:
@@ -114,9 +114,13 @@ class FirestoreMemoryService(BaseMemoryService):
               "timestamp": event.timestamp,
           },
       )
-      has_updates = True
+      count += 1
+      if count >= 500:
+        await batch.commit()
+        batch = self.client.batch()
+        count = 0
 
-    if has_updates:
+    if count > 0:
       await batch.commit()
 
   def _extract_keywords(self, text: str) -> set[str]:

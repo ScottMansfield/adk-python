@@ -348,3 +348,37 @@ async def test_add_session_to_memory_commit_error(mock_firestore_client):
 
   with pytest.raises(Exception, match="Firestore commit failed"):
     await service.add_session_to_memory(session)
+
+
+@pytest.mark.asyncio
+async def test_add_session_to_memory_exceeds_batch_limit(mock_firestore_client):
+  service = FirestoreMemoryService(client=mock_firestore_client)
+
+  from google.adk.sessions.session import Session
+
+  session = Session(id="test_session", app_name="test_app", user_id="test_user")
+
+  for i in range(501):
+    content = types.Content(parts=[types.Part.from_text(text=f"event keyword {i}")])
+    event = Event(
+        invocation_id=f"test_inv_{i}",
+        author="user",
+        content=content,
+        timestamp=1234567890.0 + i,
+    )
+    session.events.append(event)
+
+  batch1 = mock.MagicMock()
+  batch2 = mock.MagicMock()
+  batch1.commit = mock.AsyncMock()
+  batch2.commit = mock.AsyncMock()
+  mock_firestore_client.batch.side_effect = [batch1, batch2]
+
+  await service.add_session_to_memory(session)
+
+  assert mock_firestore_client.batch.call_count == 2
+  assert batch1.set.call_count == 500
+  batch1.commit.assert_called_once()
+  assert batch2.set.call_count == 1
+  batch2.commit.assert_called_once()
+
