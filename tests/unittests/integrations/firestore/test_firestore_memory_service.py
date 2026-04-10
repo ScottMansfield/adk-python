@@ -201,6 +201,41 @@ async def test_search_memory_only_stop_words(mock_firestore_client):
   mock_firestore_client.collection.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_search_memory_partial_failures(mock_firestore_client, caplog):
+  service = FirestoreMemoryService(client=mock_firestore_client)
+  app_name = "test_app"
+  user_id = "test_user"
+  query = "fox quick"
+
+  coll_ref = mock_firestore_client.collection.return_value.where.return_value.where.return_value.where.return_value
+  
+  doc_snapshot = mock.MagicMock()
+  doc_snapshot.to_dict.return_value = {
+      "content": {"parts": [{"text": "quick response"}]},
+      "author": "user",
+      "timestamp": 1234567890.0
+  }
+
+  call_count = 0
+  async def mock_get():
+    nonlocal call_count
+    call_count += 1
+    if call_count == 1:
+       raise ValueError("Mock generic network failure standalone")
+    return [doc_snapshot]
+
+  coll_ref.get = mock.AsyncMock(side_effect=mock_get)
+
+  response = await service.search_memory(
+      app_name=app_name, user_id=user_id, query=query
+  )
+
+  assert len(response.memories) == 1
+  assert response.memories[0].author == "user"
+  assert "Memory keyword search partial failure" in caplog.text
+
+
 def test_init_default_client():
   with mock.patch("google.cloud.firestore.AsyncClient") as mock_client_class:
     mock_instance = mock.MagicMock()

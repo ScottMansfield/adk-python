@@ -428,6 +428,63 @@ async def test_list_sessions_without_user_id(mock_firestore_client):
 
 
 @pytest.mark.asyncio
+async def test_list_sessions_filters_other_apps(mock_firestore_client):
+  service = FirestoreSessionService(client=mock_firestore_client)
+  app_name = "test_app"
+
+  session_doc = mock.MagicMock()
+  session_doc.to_dict.return_value = {
+      "id": "session1",
+      "appName": app_name,
+      "userId": "user1",
+      "state": {"session_key": "session_val"},
+  }
+
+  mock_firestore_client.collection_group.return_value.where.return_value.get = (
+      mock.AsyncMock(return_value=[session_doc])
+  )
+
+  app_state_coll = mock.MagicMock()
+  user_state_coll = mock.MagicMock()
+
+  def collection_side_effect(name):
+    if name == service.app_state_collection:
+      return app_state_coll
+    elif name == service.user_state_collection:
+      return user_state_coll
+    return mock.MagicMock()
+
+  mock_firestore_client.collection.side_effect = collection_side_effect
+
+  app_doc = mock.MagicMock()
+  app_doc.exists = True
+  app_doc.to_dict.return_value = {"app_key": "app_val"}
+  app_doc_ref = mock.MagicMock()
+  app_state_coll.document.return_value = app_doc_ref
+  app_doc_ref.get = mock.AsyncMock(return_value=app_doc)
+
+  user_doc = mock.MagicMock()
+  user_doc.id = "user1"
+  user_doc.to_dict.return_value = {"user_key": "user_val"}
+  user_app_doc = mock.MagicMock()
+  user_state_coll.document.return_value = user_app_doc
+  users_coll = mock.MagicMock()
+  user_app_doc.collection.return_value = users_coll
+  users_coll.get = mock.AsyncMock(return_value=[user_doc])
+
+  response = await service.list_sessions(app_name=app_name)
+
+  assert len(response.sessions) == 1
+  assert response.sessions[0].id == "session1"
+  assert response.sessions[0].app_name == app_name
+
+  mock_firestore_client.collection_group.assert_called_once_with("sessions")
+  mock_firestore_client.collection_group.return_value.where.assert_called_once_with(
+      "appName", "==", app_name
+  )
+
+
+@pytest.mark.asyncio
 async def test_create_session_already_exists(mock_firestore_client):
   service = FirestoreSessionService(client=mock_firestore_client)
   app_name = "test_app"

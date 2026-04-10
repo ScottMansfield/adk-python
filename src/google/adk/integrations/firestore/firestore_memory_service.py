@@ -169,11 +169,14 @@ class FirestoreMemoryService(BaseMemoryService):
         self._search_by_keyword(app_name, user_id, keyword)
         for keyword in keywords
     ]
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen = set()
     memories = []
     for result_list in results:
+      if isinstance(result_list, Exception):
+        logger.warning(f"Memory keyword search partial failure: {result_list}")
+        continue
       for entry in result_list:
         content_text = ""
         if entry.content and entry.content.parts:
