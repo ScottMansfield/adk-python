@@ -43,7 +43,7 @@ DEFAULT_EVENTS_COLLECTION = "events"
 DEFAULT_MEMORIES_COLLECTION = "memories"
 
 
-class FirestoreMemoryService(BaseMemoryService):
+class FirestoreMemoryService(BaseMemoryService):  # type: ignore[misc]
   """Memory service that uses Google Cloud Firestore as the backend.
 
   It uses the existing session data to create memories in a top-level memory collection.
@@ -178,7 +178,7 @@ class FirestoreMemoryService(BaseMemoryService):
     seen = set()
     memories = []
     for result_list in results:
-      if isinstance(result_list, Exception):
+      if isinstance(result_list, BaseException):
         logger.warning(f"Memory keyword search partial failure: {result_list}")
         continue
       for entry in result_list:

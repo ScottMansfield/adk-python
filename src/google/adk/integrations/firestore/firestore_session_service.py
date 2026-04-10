@@ -576,7 +576,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
             },
         )
 
-        return new_revision
+        return cast(int, new_revision)
 
       transaction_obj = self.client.transaction()
       new_revision_count = await _append_txn(transaction_obj)
