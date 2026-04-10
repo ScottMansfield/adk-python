@@ -14,14 +14,19 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime
 from datetime import timezone
 import logging
 import os
 from typing import Any
+from typing import AsyncIterator
 from typing import cast
 from typing import Optional
 from typing import TYPE_CHECKING
+
+_SessionLockKey = tuple[str, str, str]
 
 if TYPE_CHECKING:
   from google.cloud import firestore
@@ -96,9 +101,39 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         or DEFAULT_ROOT_COLLECTION
     )
     self.sessions_collection = DEFAULT_SESSIONS_COLLECTION
+
+    # Per-session locks used to serialize append_event calls in this process.
+    self._session_locks: dict[_SessionLockKey, asyncio.Lock] = {}
+    self._session_lock_ref_count: dict[_SessionLockKey, int] = {}
+    self._session_locks_guard = asyncio.Lock()
     self.events_collection = DEFAULT_EVENTS_COLLECTION
     self.app_state_collection = DEFAULT_APP_STATE_COLLECTION
     self.user_state_collection = DEFAULT_USER_STATE_COLLECTION
+
+  @asynccontextmanager
+  async def _with_session_lock(
+      self, *, app_name: str, user_id: str, session_id: str
+  ) -> AsyncIterator[None]:
+    """Serializes event appends for the same session within this process."""
+    lock_key = (app_name, user_id, session_id)
+    async with self._session_locks_guard:
+      lock = self._session_locks.get(lock_key, asyncio.Lock())
+      self._session_locks[lock_key] = lock
+      self._session_lock_ref_count[lock_key] = (
+          self._session_lock_ref_count.get(lock_key, 0) + 1
+      )
+
+    try:
+      async with lock:
+        yield
+    finally:
+      async with self._session_locks_guard:
+        remaining = self._session_lock_ref_count.get(lock_key, 0) - 1
+        if remaining <= 0 and not lock.locked():
+          self._session_lock_ref_count.pop(lock_key, None)
+          self._session_locks.pop(lock_key, None)
+        else:
+          self._session_lock_ref_count[lock_key] = remaining
 
   @staticmethod
   def _merge_state(
@@ -171,6 +206,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         "state": session_state,
         "createTime": now,
         "updateTime": now,
+        "revision": 1,
     }
 
     @firestore.async_transactional  # type: ignore[untyped-decorator]
@@ -228,7 +264,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
 
     local_now = datetime.now(timezone.utc).timestamp()
 
-    return Session(
+    session = Session(
         id=session_id,
         app_name=app_name,
         user_id=user_id,
@@ -236,6 +272,8 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         events=[],
         last_update_time=local_now,
     )
+    session._storage_update_marker = "1"
+    return session
 
   async def get_session(
       self,
@@ -307,7 +345,8 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         except (ValueError, TypeError):
           pass
 
-    return Session(
+    current_revision = data.get("revision", 0)
+    session = Session(
         id=session_id,
         app_name=app_name,
         user_id=user_id,
@@ -315,6 +354,10 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         events=events,
         last_update_time=last_update_time,
     )
+    session._storage_update_marker = (
+        str(current_revision) if current_revision > 0 else None
+    )
+    return session
 
   async def list_sessions(
       self, *, app_name: str, user_id: Optional[str] = None
@@ -385,7 +428,23 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
       self, *, app_name: str, user_id: str, session_id: str
   ) -> None:
     """Deletes a session and its events from Firestore."""
+    from google.cloud import firestore
+
     session_ref = self._get_sessions_ref(app_name, user_id).document(session_id)
+
+    @firestore.async_transactional  # type: ignore[untyped-decorator]
+    async def _mark_deleting_txn(
+        transaction: firestore.AsyncTransaction,
+    ) -> None:
+      snap = await session_ref.get(transaction=transaction)
+      if snap.exists:
+        transaction.update(session_ref, {"status": "DELETING"})
+
+    try:
+      transaction_obj = self.client.transaction()
+      await _mark_deleting_txn(transaction_obj)
+    except Exception:
+      pass
 
     events_ref = session_ref.collection(self.events_collection)
 
@@ -417,26 +476,52 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         session.app_name, session.user_id
     ).document(session.id)
 
-    if event.actions and event.actions.state_delta:
-      state_delta = event.actions.state_delta
-      state_deltas = _session_util.extract_state_delta(state_delta)
-      app_updates = state_deltas["app"]
-      user_updates = state_deltas["user"]
-      session_updates = state_deltas["session"]
+    state_delta = (
+        event.actions.state_delta
+        if event.actions and event.actions.state_delta
+        else {}
+    )
+    state_deltas = _session_util.extract_state_delta(state_delta)
+    app_updates = state_deltas["app"]
+    user_updates = state_deltas["user"]
+    session_updates = state_deltas["session"]
 
-      app_ref = self.client.collection(self.app_state_collection).document(
-          session.app_name
-      )
-      user_ref = (
-          self.client.collection(self.user_state_collection)
-          .document(session.app_name)
-          .collection("users")
-          .document(session.user_id)
-      )
+    app_ref = self.client.collection(self.app_state_collection).document(
+        session.app_name
+    )
+    user_ref = (
+        self.client.collection(self.user_state_collection)
+        .document(session.app_name)
+        .collection("users")
+        .document(session.user_id)
+    )
+
+    async with self._with_session_lock(
+        app_name=session.app_name,
+        user_id=session.user_id,
+        session_id=session.id,
+    ):
 
       @firestore.async_transactional  # type: ignore[untyped-decorator]
-      async def _append_txn(transaction: firestore.AsyncTransaction) -> None:
+      async def _append_txn(transaction: firestore.AsyncTransaction) -> int:
         # 1. Reads
+        session_snap = await session_ref.get(transaction=transaction)
+        if not session_snap.exists:
+          raise ValueError(f"Session {session.id} not found.")
+
+        session_doc = session_snap.to_dict() or {}
+        if session_doc.get("status") == "DELETING":
+          raise ValueError(f"Session {session.id} is currently being deleted.")
+
+        current_revision = session_doc.get("revision", 0)
+
+        if session._storage_update_marker is not None:
+          if session._storage_update_marker != str(current_revision):
+            raise ValueError(
+                "The session has been modified in storage since it was loaded. "
+                "Please reload the session before appending more events."
+            )
+
         app_snap = (
             await app_ref.get(transaction=transaction) if app_updates else None
         )
@@ -460,11 +545,19 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         for k, v in session_updates.items():
           session.state[k] = v
 
+        new_revision = current_revision + 1
+        session_only_state = {
+            k: v
+            for k, v in session.state.items()
+            if not k.startswith(State.APP_PREFIX)
+            and not k.startswith(State.USER_PREFIX)
+        }
         transaction.update(
             session_ref,
             {
-                "state": session.state,
+                "state": session_only_state,
                 "updateTime": firestore.SERVER_TIMESTAMP,
+                "revision": new_revision,
             },
         )
 
@@ -483,26 +576,11 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
             },
         )
 
+        return new_revision
+
       transaction_obj = self.client.transaction()
-      await _append_txn(transaction_obj)
-    else:
-      batch = self.client.batch()
-      event_id = event.id
-      event_ref = session_ref.collection(self.events_collection).document(
-          event_id
-      )
-      event_data = event.model_dump(exclude_none=True, mode="json")
-      batch.set(
-          event_ref,
-          {
-              "event_data": event_data,
-              "timestamp": firestore.SERVER_TIMESTAMP,
-              "appName": session.app_name,
-              "userId": session.user_id,
-          },
-      )
-      batch.update(session_ref, {"updateTime": firestore.SERVER_TIMESTAMP})
-      await batch.commit()
+      new_revision_count = await _append_txn(transaction_obj)
+      session._storage_update_marker = str(new_revision_count)
 
     await super().append_event(session, event)
     return event

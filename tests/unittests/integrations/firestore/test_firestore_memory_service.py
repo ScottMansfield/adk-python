@@ -208,21 +208,24 @@ async def test_search_memory_partial_failures(mock_firestore_client, caplog):
   user_id = "test_user"
   query = "fox quick"
 
-  coll_ref = mock_firestore_client.collection.return_value.where.return_value.where.return_value.where.return_value
-  
+  coll_ref = (
+      mock_firestore_client.collection.return_value.where.return_value.where.return_value.where.return_value
+  )
+
   doc_snapshot = mock.MagicMock()
   doc_snapshot.to_dict.return_value = {
       "content": {"parts": [{"text": "quick response"}]},
       "author": "user",
-      "timestamp": 1234567890.0
+      "timestamp": 1234567890.0,
   }
 
   call_count = 0
+
   async def mock_get():
     nonlocal call_count
     call_count += 1
     if call_count == 1:
-       raise ValueError("Mock generic network failure standalone")
+      raise ValueError("Mock generic network failure standalone")
     return [doc_snapshot]
 
   coll_ref.get = mock.AsyncMock(side_effect=mock_get)
@@ -359,7 +362,9 @@ async def test_add_session_to_memory_exceeds_batch_limit(mock_firestore_client):
   session = Session(id="test_session", app_name="test_app", user_id="test_user")
 
   for i in range(501):
-    content = types.Content(parts=[types.Part.from_text(text=f"event keyword {i}")])
+    content = types.Content(
+        parts=[types.Part.from_text(text=f"event keyword {i}")]
+    )
     event = Event(
         invocation_id=f"test_inv_{i}",
         author="user",
@@ -381,4 +386,3 @@ async def test_add_session_to_memory_exceeds_batch_limit(mock_firestore_client):
   batch1.commit.assert_called_once()
   assert batch2.set.call_count == 1
   batch2.commit.assert_called_once()
-
