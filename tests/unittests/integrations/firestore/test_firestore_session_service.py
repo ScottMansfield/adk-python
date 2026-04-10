@@ -330,6 +330,64 @@ async def test_append_event_with_state_delta(mock_firestore_client):
 
 
 @pytest.mark.asyncio
+async def test_append_event_with_temp_state(mock_firestore_client):
+  service = FirestoreSessionService(client=mock_firestore_client)
+  app_name = "test_app"
+  user_id = "test_user"
+  from google.adk.events.event import Event
+  from google.adk.events.event import EventActions
+  from google.adk.sessions.session import Session
+
+  session = Session(id="test_session", app_name=app_name, user_id=user_id)
+
+  event = Event(
+      invocation_id="test_inv",
+      author="user",
+      actions=EventActions(
+          state_delta={"temp:k1": "v1", "session_key": "session_val"}
+      ),
+  )
+
+  session_doc_snapshot = mock.MagicMock()
+  session_doc_snapshot.exists = True
+  session_doc_snapshot.to_dict.return_value = {"revision": 0}
+
+  root_coll = mock_firestore_client.collection.return_value
+  app_ref = root_coll.document.return_value
+  users_coll = app_ref.collection.return_value
+  user_ref = users_coll.document.return_value
+  sessions_ref = user_ref.collection.return_value
+  session_doc_ref = sessions_ref.document.return_value
+  session_doc_ref.get = mock.AsyncMock(return_value=session_doc_snapshot)
+
+  with mock.patch("google.cloud.firestore.async_transactional", lambda x: x):
+    await service.append_event(session, event)
+
+  # 1. Verify it was applied in-memory
+  assert session.state["temp:k1"] == "v1"
+  assert session.state["session_key"] == "session_val"
+
+  # 2. Verify it was trimmed before Firestore save
+  transaction = mock_firestore_client.transaction.return_value
+  transaction.set.assert_called()
+
+  # Filter calls for the one that actually sets the event data
+  event_set_calls = [
+      call
+      for call in transaction.set.call_args_list
+      if len(call[0]) > 1
+      and isinstance(call[0][1], dict)
+      and "event_data" in call[0][1]
+  ]
+  assert len(event_set_calls) == 1
+  event_data = event_set_calls[0][0][1]["event_data"]
+
+  # Temporary keys should be deleted from delta before snapshot
+  assert "temp:k1" not in event_data["actions"]["state_delta"]
+  assert event_data["actions"]["state_delta"]["session_key"] == "session_val"
+
+
+@pytest.mark.asyncio
 async def test_list_sessions_with_user_id(mock_firestore_client):
   service = FirestoreSessionService(client=mock_firestore_client)
   app_name = "test_app"
