@@ -23,7 +23,6 @@ import os
 from typing import Any
 from typing import AsyncIterator
 from typing import cast
-from typing import Optional
 from typing import TYPE_CHECKING
 
 _SessionLockKey = tuple[str, str, str]
@@ -75,8 +74,8 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
 
   def __init__(
       self,
-      client: Optional[firestore.AsyncClient] = None,
-      root_collection: Optional[str] = None,
+      client: firestore.AsyncClient | None = None,
+      root_collection: str | None = None,
   ):
     """Initializes the Firestore session service.
 
@@ -167,8 +166,8 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
       *,
       app_name: str,
       user_id: str,
-      state: Optional[dict[str, Any]] = None,
-      session_id: Optional[str] = None,
+      state: dict[str, Any] | None = None,
+      session_id: str | None = None,
   ) -> Session:
     """Creates a new session in Firestore."""
     from google.cloud import firestore
@@ -281,8 +280,8 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
       app_name: str,
       user_id: str,
       session_id: str,
-      config: Optional[GetSessionConfig] = None,
-  ) -> Optional[Session]:
+      config: GetSessionConfig | None = None,
+  ) -> Session | None:
     """Gets a session from Firestore."""
     session_ref = self._get_sessions_ref(app_name, user_id).document(session_id)
     doc = await session_ref.get()
@@ -361,7 +360,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
     return session
 
   async def list_sessions(
-      self, *, app_name: str, user_id: Optional[str] = None
+      self, *, app_name: str, user_id: str | None = None
   ) -> ListSessionsResponse:
     """Lists sessions from Firestore."""
     if user_id:

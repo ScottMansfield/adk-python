@@ -19,7 +19,6 @@ import logging
 import os
 import re
 from typing import Any
-from typing import Optional
 from typing import TYPE_CHECKING
 
 from google.cloud.firestore_v1.base_query import FieldFilter
@@ -51,10 +50,10 @@ class FirestoreMemoryService(BaseMemoryService):  # type: ignore[misc]
 
   def __init__(
       self,
-      client: Optional[firestore.AsyncClient] = None,
-      events_collection: Optional[str] = None,
-      stop_words: Optional[set[str]] = None,
-      memories_collection: Optional[str] = None,
+      client: firestore.AsyncClient | None = None,
+      events_collection: str | None = None,
+      stop_words: set[str] | None = None,
+      memories_collection: str | None = None,
   ):
     """Initializes the Firestore memory service.
 
