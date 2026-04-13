@@ -295,23 +295,24 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
       return None
 
     # Fetch events
-    events_ref = session_ref.collection(self.events_collection)
-    query = events_ref.order_by("timestamp")
-
-    if config:
-      if config.after_timestamp:
-        after_dt = datetime.fromtimestamp(config.after_timestamp)
-        query = query.where("timestamp", ">=", after_dt)
-      if config.num_recent_events:
-        query = query.limit_to_last(config.num_recent_events)
-
-    events_docs = await query.get()
     events = []
-    for event_doc in events_docs:
-      event_data = event_doc.to_dict()
-      if event_data and "event_data" in event_data:
-        ed = event_data["event_data"]
-        events.append(Event.model_validate(ed))
+    if not (config and config.num_recent_events == 0):
+      events_ref = session_ref.collection(self.events_collection)
+      query = events_ref.order_by("timestamp")
+
+      if config:
+        if config.after_timestamp:
+          after_dt = datetime.fromtimestamp(config.after_timestamp)
+          query = query.where("timestamp", ">=", after_dt)
+        if config.num_recent_events:
+          query = query.limit_to_last(config.num_recent_events)
+
+      events_docs = await query.get()
+      for event_doc in events_docs:
+        event_data = event_doc.to_dict()
+        if event_data and "event_data" in event_data:
+          ed = event_data["event_data"]
+          events.append(Event.model_validate(ed))
 
     # Let's continue getting session.
     session_state = data.get("state", {})

@@ -755,3 +755,37 @@ async def test_list_sessions_missing_states(mock_firestore_client):
   assert session.state["session_key"] == "session_val"
   assert "_app_app_key" not in session.state
   assert "_user_user_key" not in session.state
+
+
+@pytest.mark.asyncio
+async def test_get_session_with_zero_num_recent_events(mock_firestore_client):
+  service = FirestoreSessionService(client=mock_firestore_client)
+  app_name = "test_app"
+  user_id = "test_user"
+  session_id = "test_session"
+
+  doc_snapshot = (
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value
+  )
+  doc_snapshot.exists = True
+  doc_snapshot.to_dict.return_value = {
+      "id": session_id,
+      "appName": app_name,
+      "userId": user_id,
+  }
+
+  events_collection_ref = (
+      mock_firestore_client.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value
+  )
+
+  from google.adk.sessions.base_session_service import GetSessionConfig
+
+  config = GetSessionConfig(num_recent_events=0)
+
+  session = await service.get_session(
+      app_name=app_name, user_id=user_id, session_id=session_id, config=config
+  )
+
+  assert session is not None
+  assert len(session.events) == 0
+  events_collection_ref.get.assert_not_called()
