@@ -50,6 +50,7 @@ class FirestoreMemoryService(BaseMemoryService):  # type: ignore[misc]
 
   def __init__(
       self,
+      *,
       client: firestore.AsyncClient | None = None,
       events_collection: str | None = None,
       stop_words: set[str] | None = None,

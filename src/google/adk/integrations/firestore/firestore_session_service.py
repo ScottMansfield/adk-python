@@ -74,6 +74,7 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
 
   def __init__(
       self,
+      *,
       client: firestore.AsyncClient | None = None,
       root_collection: str | None = None,
   ):
