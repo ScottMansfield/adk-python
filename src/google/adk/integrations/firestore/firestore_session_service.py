@@ -412,16 +412,29 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
         u_state = user_states_map.get(u_id, {})
         merged = self._merge_state(app_state, u_state, s_state)
 
-        sessions.append(
-            Session(
-                id=data["id"],
-                app_name=data["appName"],
-                user_id=data["userId"],
-                state=merged,
-                events=[],
-                last_update_time=0.0,
-            )
+        update_time = data.get("updateTime")
+        last_update_time = 0.0
+        if update_time:
+          if isinstance(update_time, datetime):
+            last_update_time = update_time.timestamp()
+          else:
+            try:
+              last_update_time = float(update_time)
+            except (ValueError, TypeError):
+              pass
+
+        current_revision = data.get("revision", 0)
+        session_obj = Session(
+            id=data["id"],
+            app_name=data["appName"],
+            user_id=data["userId"],
+            state=merged,
+            events=[],
+            last_update_time=last_update_time,
         )
+        if current_revision > 0:
+          session_obj._storage_update_marker = str(current_revision)
+        sessions.append(session_obj)
 
     return ListSessionsResponse(sessions=sessions)
 
@@ -515,13 +528,13 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
           raise ValueError(f"Session {session.id} is currently being deleted.")
 
         current_revision = session_doc.get("revision", 0)
+        current_marker = str(current_revision) if current_revision > 0 else None
 
-        if session._storage_update_marker is not None:
-          if session._storage_update_marker != str(current_revision):
-            raise ValueError(
-                "The session has been modified in storage since it was loaded. "
-                "Please reload the session before appending more events."
-            )
+        if session._storage_update_marker != current_marker:
+          raise ValueError(
+              "The session has been modified in storage since it was loaded. "
+              "Please reload the session before appending more events."
+          )
 
         app_snap = (
             await app_ref.get(transaction=transaction) if app_updates else None
@@ -543,13 +556,14 @@ class FirestoreSessionService(BaseSessionService):  # type: ignore[misc]
           current_user.update(user_updates)
           transaction.set(user_ref, current_user, merge=True)
 
-        for k, v in session_updates.items():
-          session.state[k] = v
-
         new_revision = current_revision + 1
+        combined_state = {k: v for k, v in session.state.items()}
+        for k, v in session_updates.items():
+          combined_state[k] = v
+
         session_only_state = {
             k: v
-            for k, v in session.state.items()
+            for k, v in combined_state.items()
             if not k.startswith(State.APP_PREFIX)
             and not k.startswith(State.USER_PREFIX)
         }
